@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<info>
+    <id>immo</id>
+    <name>Immo</name>
+    <summary>Immobilienverwaltung in Nextcloud</summary>
+    <description>Verwaltet Immobilien, Einheiten, Mieter, Mietverhältnisse und Abrechnungen vollständig innerhalb einer Nextcloud Instanz.</description>
+    <licence>agpl</licence>
+    <author mail="dev@example.com">Immo</author>
+    <version>0.1.0</version>
+    <namespace>Immo</namespace>
+    <category>tools</category>
+    <website>https://example.com/immo</website>
+    <bugs>https://example.com/immo/issues</bugs>
+    <dependencies>
+        <nextcloud min-version="27" max-version="28" />
+    </dependencies>
+    <types>
+        <filesystem/>
+    </types>
+</info>
