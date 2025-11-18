@@ -1,519 +1,510 @@
-## Architektur
+### Architektur
 
-Die Immo App wird als reguläre Nextcloud-App (NC 32) entwickelt und vollständig in die bestehende Plattform integriert:
+Die Immo App wird als eigenständige Nextcloud-App umgesetzt und nutzt ausschließlich das bestehende Nextcloud-Framework:
 
-- **Backend**
-  - PHP, Nextcloud AppFramework (MVC).
-  - Registrierung über `Application.php` mit `IBootstrap`.
-  - Nutzung der NC-Datenbank (Doctrine-Mapping via AppFramework, keine direkten SQL-Strings sofern vermeidbar).
+- **Architekturtyp**: klassische Nextcloud MVC-App
+  - PHP-Backend mit AppFramework (Controller, Services, Migrations)
+  - Serverseitige Render-Templates (PHP/Twig-ähnlich) für Grundlayout
+  - Clientseitiges Rendering des Inhalts innerhalb einer Single-Page-ähnlichen App mittels Vanilla JS (AJAX + DOM-Manipulation)
+- **Integration in Nextcloud**
+  - Registrierung über `Application.php` (implements `IBootstrap`)
+  - Navigationseintrag in `appinfo/info.xml`
+  - Routen in `appinfo/routes.php`
   - Nutzung von:
-    - `OCP\IUserSession` / `OCP\IUserManager` für User.
-    - `OCP\IGroupManager` oder App-interne Rollen-Tabelle zur Rollensteuerung.
-    - `OCP\Files\IRootFolder` für Dateisystem-Zugriff.
-    - `OCP\IL10N` für alle sichtbaren Backend-Strings.
+    - Nextcloud-Userverwaltung und Session
+    - Nextcloud-Datenbank (via AppFramework / Migrations)
+    - Nextcloud-Dateisystem (IRootFolder, IUserFolder)
+    - Logging (ILogger)
+    - Lokalisierung (OCP\IL10N im Backend, `t()` im Frontend)
+- **Deployment / Kompatibilität**
+  - Zielsystem: Nextcloud 32
+  - Keine Änderung von Core-Apps, kein Override von Auth / Files / Sharing
+  - Keine externen Composer-Pakete, kein webpack
 
-- **Frontend**
-  - Serverseitiges Rendern des Grundlayouts (Haupt-App-Template).
-  - Clientseitige Ansichtsnavigation (Single Page-like) mit Vanilla ES6 JS.
-  - Modul-/Namespace-Pattern, keine Bundler/kein webpack.
-  - AJAX-Kommunikation mit JSON-Endpunkten (REST-ähnlich, **kein OCS**-Routing), immer mit Header `OCS-APIREQUEST: 'true'`.
-  - Nutzung der Nextcloud JS-APIs (`OC.requestToken`, `OC.generateUrl`, `t()` für Texte).
-  - UI orientiert sich an Nextcloud-Design (App-Navigation links, Inhalt rechts).
+UI-seitig verhält sich die App wie eine Single-Page-Anwendung innerhalb eines Nextcloud-Contents:
+- Navigation in der linken Spalte (Immo-spezifische Menüpunkte)
+- Hauptinhalt rechts wird bei Navigation per AJAX neu geladen, ohne gesamten Seitenreload.
 
-- **Sicherheits- & Integrationsprinzipien**
-  - Autorisierung auf Basis von Nextcloud-Usern plus app-interne Ownership-Checks (jede Immobilie gehört genau einem Verwalter).
-  - Rollen „Verwalter“ und „Mieter“ abgebildet über:
-    - Nextcloud-Gruppen (z. B. `immo_admin`, `immo_tenant`) **oder** app-interne Rolle je User.
-  - Keine Änderungen an NC-Core, kein Override von Login/Files/Sharing.
 
 ---
 
-## Hauptkomponenten
+### Hauptkomponenten
 
-### 1. App-Registrierung & Bootstrapping
+#### 1. Backend-Komponenten
 
-- `lib/AppInfo/Application.php`
-  - Implementiert `OCP\AppFramework\Bootstrap\IBootstrap`.
-  - Registriert:
-    - Routen (Web-UI + JSON/AJAX).
-    - Services (Mapper, Manager-Services, Generierung von Abrechnungen).
-  - Setzt Middleware, z. B. für:
-    - Rollenprüfung (Verwalter/Mieter).
-    - Standard-JSON-Responses.
+1. **Application / Bootstrap**
+   - `lib/AppInfo/Application.php`
+     - Registriert Services (Dependency Injection)
+     - Registriert Event-Listener falls nötig (z.B. auf User-Deletion)
+     - Setzt Routing-Konfiguration
 
-- `appinfo/info.xml`
-  - App-Metadaten, Abhängigkeit „>= 32“.
+2. **Controller (AppFramework\Controller)**
+   - `DashboardController`
+     - Endpunkte für Dashboard-Daten (Kennzahlen, offene Punkte)
+   - `PropertyController` (Immobilien)
+     - CRUD: Liste, Detail, Create, Update, Delete
+     - Dokumentenverknüpfung
+   - `UnitController` (Mietobjekte)
+     - CRUD, Listen pro Immobilie
+   - `TenantController` (Mieter)
+     - CRUD, Such-/Filter-Einstellungen
+   - `TenancyController` (Mietverhältnisse)
+     - CRUD, Statusableitung (aktiv/historisch/zukünftig)
+     - Listen pro Mieter und pro Mietobjekt
+   - `TransactionController` (Einnahmen/Ausgaben)
+     - CRUD
+     - Filter (Jahr, Immobilie, Kategorie, etc.)
+   - `DocumentLinkController`
+     - Verknüpfung / Auflistung / Entfernen von Dateilinks
+   - `AccountingController` (Abrechnungen & Verteilungen)
+     - Erstellung Jahresabrechnung
+     - Berechnungen / Statistiken / Verteilung von Jahresbeträgen
+   - `ViewController`
+     - Liefert Grund-Template der Immo App (HTML) für Navigationseintrag
+   - Alle Controller:
+     - Attribute wie `#[NoAdminRequired]`, `#[NoCSRFRequired]` nur wo nötig
+     - Rollenprüfung (Verwalter/Mieter) im Code
 
-### 2. Datenmodell (Tabellen / Entities)
+3. **Services (Business-Logik)**
+   - `UserRoleService`
+     - Mapping Nextcloud-Gruppen → Rollen: „Verwalter“ / „Mieter“
+     - z.B. Konvention: Gruppe `immo_admin` / `immo_tenant` oder konfigurierbar in App-Einstellungen
+   - `PropertyService`
+     - CRUD-Logik für Immobilien
+     - Filterung nach aktuellerem Benutzer (nur eigene Immobilien)
+     - Berechnung einfacher Kennzahlen pro Immobilie (Anzahl Mietobjekte, Summen etc.)
+   - `UnitService` (Mietobjekt-Logik)
+     - CRUD, Konsistenzprüfungen (Immobilie existiert & gehört User)
+     - Kennzahlen (Miete/m², Belegung/Leerstand)
+   - `TenantService`
+     - CRUD für Mieter
+     - Sicherstellen, dass Mieter-Objekte dem Verwalter-Bereich zugeordnet sind
+   - `TenancyService`
+     - Mietverhältnis-Verwaltung
+     - Statusberechnung basierend auf Start-/Enddatum
+     - Berechnung Summen pro Zeitraum
+   - `TransactionService`
+     - Einnahmen/Ausgaben
+     - Jahr ableiten aus Datum
+     - Filterlogik (Jahr, Immobilie, Kategorie)
+   - `DocumentLinkService`
+     - Speichert Referenzen auf Dateien aus dem Nextcloud-Dateisystem (Pfad + fileid)
+     - Keine eigenständige Rechteverwaltung, nur Verweise
+   - `AccountingService`
+     - Erstellung der Jahresabrechnungen:
+       - Aggregation von Einnahmen/Ausgaben
+       - Kennzahlen (Rendite, Kostendeckung, Miete/m²)
+     - Logik zur Verteilung von Jahresbeträgen nach belegten Monaten auf Mietverhältnisse
+   - `ReportFileService`
+     - Generierung einer textbasierten Abrechnungsdatei (`.md` o.ä.)
+     - Ablage im NC-Dateisystem unter `/ImmoApp/Abrechnungen/<Jahr>/<Immobilie>/`
+     - Rückgabe File-ID / Pfad zur Verknüpfung
 
-Alle Tabellen erhalten:
-- Primärschlüssel `id` (int/autoincrement).
-- Felder `owner_uid` (für Verwalter) wo relevant.
-- Audit-Felder: `created_at`, `updated_at`.
+4. **Datenmodell / Entities**
 
-Währung wird implizit Euro (kein Währungsfeld notwendig).
+Alle Tabellen werden über Migrations definiert, keine `database.xml`. Beispieltabellen:
 
-**2.1 Immobilien**
+- `immo_properties`
+  - `id` (int, PK)
+  - `owner_uid` (string; Nextcloud-User, der Verwalter)
+  - `name`, `street`, `zip`, `city`, `country`
+  - `type`, `notes`
+  - Metadaten: `created_at`, `updated_at`
+- `immo_units` (Mietobjekte)
+  - `id`, `property_id`
+  - `label`, `unit_number`, `land_register`
+  - `living_area`, `usable_area`, `type`, `notes`
+- `immo_tenants`
+  - `id`
+  - `owner_uid` (Verwalter-Zuordnung oder multi-owner Konzept)
+  - `name`
+  - `address`, `email`, `phone`
+  - `customer_ref`, `notes`
+- `immo_tenancies`
+  - `id`
+  - `property_id`, `unit_id`, `tenant_id`
+  - `start_date`, `end_date`
+  - `rent_cold` (EUR)
+  - `service_charge` (Nebenkosten / Vorauszahlung, Betrag + Flag)
+  - `deposit`, `conditions`
+- `immo_transactions`
+  - `id`
+  - `owner_uid`
+  - `property_id`, `unit_id` (nullable), `tenancy_id` (nullable)
+  - `type` (income/expense)
+  - `category`
+  - `date`
+  - `amount`
+  - `description`
+  - `year` (int, redundant)
+  - Flag/Feld `is_annual` (Jahresbetrag)
+- `immo_doc_links`
+  - `id`
+  - `owner_uid`
+  - `entity_type` (property|unit|tenant|tenancy|transaction|report)
+  - `entity_id`
+  - `file_id` (int, Nextcloud fileid)
+  - `path` (string, relativer Pfad innerhalb User-Files)
+- `immo_reports`
+  - `id`
+  - `owner_uid`
+  - `property_id`
+  - `year`
+  - `file_id`
+  - `path`
+  - `created_at`
+- `immo_annual_distribution`
+  - `id`
+  - `transaction_id` (referenziert Jahresbetrag)
+  - `tenancy_id`
+  - `year`
+  - `months` (int, belegte Monate)
+  - `allocated_amount`
 
-Tabelle `*immo_properties*`:
+Entities können wahlweise mit Mappers (AppFramework\Db\Entity + Mapper) realisiert werden.
 
-- `id`
-- `owner_uid` (NC user id, Verwalter)
-- `name` (string)
-- `street`, `zip`, `city`, `country`
-- `type` (enum/string, optional)
-- `description` (text, optional)
-- Kennzahlenfelder optional für spätere Caching-Zwecke.
-- Soft-Delete-Flag optional (`deleted` tinyint) für spätere Erweiterungen.
+5. **Migrations**
+   - `lib/Migration/VersionXXXXXX`-Klassen
+   - Erzeugen / Ändern der oben genannten Tabellen
+   - Indizes auf `owner_uid`, `property_id`, `year` zur Performance
 
-**2.2 Mietobjekte**
+6. **Konfiguration**
+   - App-Konfiguration über `IConfig`
+     - z.B. Rollen-Gruppennamen (`immo_group_admin`, `immo_group_tenant`)
+     - Standardpfad für Abrechnungen
 
-Tabelle `*immo_units*`:
 
-- `id`
-- `property_id` (FK → `immo_properties`)
-- `label` (z. B. „Whg. 3. OG links“)
-- `unit_number` (Wohnungsnummer/Türnummer)
-- `land_register_entry` (Grundbuch)
-- `living_area` (decimal, m²)
-- `usable_area` (decimal, optional)
-- `type` (Wohnung, Gewerbe, Stellplatz, optional)
-- `notes` (text)
+#### 2. Frontend-Komponenten
 
-**2.3 Mieter**
+1. **Layout-Template**
+   - `templates/main.php`
+     - Grundstruktur: Navigation links, Content-Div rechts
+     - Einbindung der Haupt-JS-Datei und CSS
+     - Navigation-Items: Dashboard, Immobilien, Mietobjekte, Mieter, Mietverhältnisse, Einnahmen/Ausgaben, Abrechnungen, Einstellungen (optional)
+   - Alle weiteren Inhalte werden in den Haupt-Content-Container per AJAX nachgeladen.
 
-Tabelle `*immo_tenants*`:
+2. **JS-Namespace & Module (ES6, kein webpack)**
+   - Globales Namespace-Objekt: `window.ImmoApp = { ... }`
+   - Untermodule:
+     - `ImmoApp.Api`  
+       - Wrapper für `fetch` mit:
+         - `OC.linkToRoute()`-URLs (in Data-Attributes oder inline generiert)
+         - Setzen von Headern inkl. `'OCS-APIREQUEST': 'true'`
+         - JSON-Parsing und Fehlerbehandlung
+     - `ImmoApp.Router`
+       - Steuerung der Navigation innerhalb der App (z.B. Hash-basierter Router `#/properties`, `#/dashboard`)
+       - Lädt entsprechende View-Module
+     - `ImmoApp.Views.Dashboard`
+       - Lädt Dashboard-Daten via `/dashboard/stats` (o.ä.)
+       - Rendern von Kennzahlen, Filtern (Jahr, Immobilie)
+     - `ImmoApp.Views.Properties`
+       - Liste + Detail + Formulare für Immobilien
+       - Dokumentenverknüpfung
+     - `ImmoApp.Views.Units`
+       - Kontext-bezogene Anzeige (gefiltert nach Immobilie)
+     - `ImmoApp.Views.Tenants`
+       - Liste, Detail, Mietverhältnisse pro Mieter
+     - `ImmoApp.Views.Tenancies`
+       - Listen pro Einheit/Mieter
+     - `ImmoApp.Views.Transactions`
+       - Liste Einnahmen/Ausgaben, Filter nach Jahr/Immobilie/Kategorie
+     - `ImmoApp.Views.Accounting`
+       - Erzeugung von Jahresabrechnungen, Anzeige von Report-Listen
+     - `ImmoApp.Util`
+       - Formatierung (Datum, Beträge in EUR), einfache Template-Funktionen
+   - Alle sichtbaren Strings im Frontend werden über `t('immoapp', '…')` aufgelöst.
 
-- `id`
-- `owner_uid` (Verwalter, dem dieser Mieter-Datensatz zugeordnet ist)
-- `name`
-- `street`, `zip`, `city`, `country` (optional)
-- `email` (optional)
-- `phone` (optional)
-- `customer_no` (optional)
-- `notes`
-- Optional `nc_user_uid` wenn ein Mieter ein NC-Login besitzt (für Zugriffsbeschränkung im Portal).
+3. **Interaktion**
+   - Navigation auf Klick:
+     - Router aktualisiert Hash/State
+     - Router lädt Daten per AJAX vom passenden Controller
+     - DOM (Haupt-Content-Container) wird vollständig neu gerendert (clientseitige Render-Templates)
+   - Formulare:
+     - HTML-Form (servergerendert oder dynamisch generiert)
+     - Submit via JS `fetch` (JSON), Validierungsfeedback im Client
 
-**2.4 Mietverhältnisse**
+4. **Styles**
+   - Nutzung Nextcloud Standard-CSS-Klassen & -Tokens
+   - Minimale eigene CSS-Datei für Layout-Details, keine externen Frameworks
 
-Tabelle `*immo_tenancies*`:
-
-- `id`
-- `property_id` (Denormalisierung, ableitbar aus Unit, aber für Queries hilfreich)
-- `unit_id` (FK → `immo_units`)
-- `tenant_id` (FK → `immo_tenants`)
-- `start_date` (date)
-- `end_date` (date, nullable)
-- `base_rent` (decimal, Kaltmiete)
-- `additional_costs` (decimal, optional)
-- `additional_costs_type` (enum: `advance`, `flat`, optional)
-- `deposit` (decimal, optional)
-- `terms` (text, weitere Konditionen)
-- Berechnete Felder:
-  - `status` (enum `active`, `historical`, `future`) kann beim Lesen dynamisch aus Datum berechnet werden – in V1 keine Persistenz nötig.
-
-**2.5 Einnahmen/Ausgaben**
-
-Tabelle `*immo_transactions*`:
-
-- `id`
-- `owner_uid`
-- `property_id` (Pflicht)
-- `unit_id` (nullable)
-- `tenancy_id` (nullable)
-- `type` (`income` | `expense`)
-- `category` (string/enumeration, z. B. Miete, Nebenkosten, Kredit, Instandhaltung, Verwaltung, Sonstiges)
-- `date` (date/datetime)
-- `amount` (decimal)
-- `description` (text)
-- `year` (int, redundante Ableitung aus `date` für Performance)
-- Flag für Jahresbetrag, falls nötig:
-  - `is_annual` (boolean) zur Kennzeichnung von Beträgen, die verteilt werden müssen (z. B. Versicherung/Kreditzinsen).
-
-Für die Verteilungslogik wird kein eigenes Buchungsobjekt benötigt; das Ergebnis kann on-the-fly berechnet oder in einer separaten Tabelle persistiert werden.
-
-**2.6 Verteilte Jahresbeträge (optional V1)**
-
-Variante V1 minimal: Berechnung „on demand“ bei Anzeige von Statistiken, Speicherung der Ergebnisse in transienten Strukturen im RAM. Kein DB-Modell nötig.
-
-Variante „persistiert“ (falls sinnvoll):
-
-Tabelle `*immo_distribution_shares*`:
-
-- `id`
-- `transaction_id` (FK → `immo_transactions`, jener Jahresbetrag)
-- `tenancy_id`
-- `year`
-- `months_count` (int)
-- `share_amount` (decimal)
-
-**2.7 Dokumentenverknüpfungen**
-
-Tabelle `*immo_attachments*`:
-
-- `id`
-- `owner_uid`
-- `entity_type` (enum/string: `property`, `unit`, `tenant`, `tenancy`, `transaction`, `statement`)
-- `entity_id` (int)
-- `file_path` (string, relativer Pfad im Home-Filesystem des Benutzers, z. B. `files/ImmoApp/...`)
-- Optional `file_id` (int, NC FileId für schnelleren Zugriff).
-- `label` (z. B. „Mietvertrag 2023“)
-
-**2.8 Abrechnungen**
-
-Tabelle `*immo_statements*`:
-
-- `id`
-- `owner_uid`
-- `year`
-- `property_id`
-- Optional: `unit_id`, `tenancy_id`, `tenant_id` (für spätere Erweiterungen).
-- `file_path` (Pfad zur gespeicherten Abrechnungsdatei)
-- `created_at`
-- Metadaten (Summen) optional: `total_income`, `total_expense`, `net_result` (Cache für schnellere Dropdown-Listen).
-
-**2.9 Rollenmodell**
-
-Tabelle `*immo_user_roles*` (falls nicht nur über Gruppen):
-
-- `id`
-- `user_uid`
-- `role` (`manager`, `tenant`)
-
-NC-Gruppen können parallel / alternativ verwendet werden. Implementierung: zuerst gruppenbasiert, Fallback auf eigenständige Tabelle möglich.
 
 ---
 
-### 3. Services / Manager-Klassen
+### Datenfluss
 
-- `PropertyService`: CRUD & Abfragen für Immobilien, Ownership-Prüfung.
-- `UnitService`: CRUD & Abfragen für Mietobjekte, Ownership- & Property-Konsistenz.
-- `TenantService`: CRUD für Mieter, Zuordnung zu Verwalter.
-- `TenancyService`: CRUD & Statusbestimmung, Zuordnung von Mieter/Mietobjekt/Immobilie.
-- `TransactionService`: Einnahmen/Ausgaben, Filter (Jahr, Immobilie, Kategorie/Unit/Tenancy).
-- `AttachmentService`: Verwaltung von Dokumentenverknüpfungen, Zugriff auf Filesystem.
-- `StatementService`: Erstellung von Jahresabrechnungen:
-  - Datenaggregation.
-  - Generierung von Markdown/Textinhalt.
-  - Schreiben der Datei ins Nextcloud-Filesystem.
-  - Anlegen eines `immo_statements`-Datensatzes.
-- `DashboardService`:
-  - Kennzahlen (Anzahl Immobilien, Units, aktive Tenancies, Soll-Miete, Miete/m² etc.).
+#### 1. Authentifizierung & Rollen
 
----
+1. User meldet sich in Nextcloud an.
+2. Öffnet Immo App (Navigation).
+3. `ViewController` rendert Grund-Template:
+   - user info aus Nextcloud Session
+   - JS erhält initial die Rolle des Users (Verwalter/Mieter) und relevante IDs (z.B. aktueller User).
+4. JS ruft bei Navigation API-Endpunkte auf:
+   - `UserRoleService` prüft `IUserSession` + App-Config:
+     - Ist User in Verwalter-Gruppe? → Rolle „Verwalter“
+     - Ist User in Mieter-Gruppe? → Rolle „Mieter“
+   - Controller erlauben oder verbieten Aktionen basierend auf Rolle.
 
-### 4. Controller
+#### 2. Stammdaten: Immobilien / Mietobjekte / Mieter
 
-Alle Controller erben von `OCP\AppFramework\Controller`. Sichtbare Strings mit `IL10N`. Zugriffsschutz über Attribute:
+- **Erstellen Immobilie**
+  1. Verwalter öffnet `#/properties/new`.
+  2. JS zeigt Formular, Nutzer speichert.
+  3. AJAX POST → `PropertyController::create()`.
+  4. `PropertyService` validiert, setzt `owner_uid = currentUser`.
+  5. Daten werden via Mapper in `immo_properties` gespeichert.
+  6. Response JSON → Client aktualisiert Liste.
 
-- Haupt-App-Controller (`PageController` o. ä.):
-  - Route `/apps/immo` → rendert App-Template.
-  - Attribut `#[NoAdminRequired]`.
-  - Zugang nur für eingeloggte User.
+- **Listen & Filter**
+  - GET `/properties` → PropertyController:
+    - filtert `immo_properties` nach `owner_uid = currentUser`.
+    - optional Filter nach Kennzahlen/Jahr (z. B. für Dashboard).
 
-- JSON-/AJAX-Controller:
-  - `PropertyController`, `UnitController`, `TenantController`, `TenancyController`, `TransactionController`, `AttachmentController`, `StatementController`, `DashboardController`.
-  - Endpunkte wie:
-    - `GET /apps/immo/api/properties`
-    - `POST /apps/immo/api/properties`
-    - `PUT /apps/immo/api/properties/{id}`
-    - `DELETE /apps/immo/api/properties/{id}`
-  - Attribute:
-    - `#[NoAdminRequired]` (Login erforderlich).
-    - Kein `#[NoCSRFRequired]` für schreibende Requests – CSRF-Token wird via JS gesendet.
-    - `#[NoCSRFRequired]` nur für reine GET-Read-APIs, falls nötig und unkritisch, aber in NC üblicherweise dennoch mit CSRF.
+- **Mietobjekte / Mieter** analog:
+  - Immer Zuordnung zu genau einem Verwalter (über `owner_uid` oder abgeleitete Immobilie).
 
-Alle Endpunkte validieren:
-- Rolle (Verwalter vs. Mieter) und Ownership.
-- Input-Daten.
+#### 3. Mietverhältnisse
 
----
+- **Neues Mietverhältnis**
+  1. Verwalter wählt Immobilie + Mietobjekt + Mieter.
+  2. JS lädt zulässige Mieter und Mietobjekte (nur eigene).
+  3. POST → `TenancyController::create()`.
+  4. `TenancyService`:
+     - Validiert Start/Enddaten.
+     - Berechnet Status (optional, oder Status dynamisch im UI anhand Daten).
+     - Speichert in `immo_tenancies`.
+  5. Dashboard / Listen nutzen Dienste, um Status (aktiv/historisch/zukünftig) on-the-fly zu bestimmen.
 
-## Datenfluss
+#### 4. Einnahmen / Ausgaben
 
-### 1. Login & Rollenauflösung
+- **Neue Buchung**
+  1. Verwalter öffnet `#/transactions/new`.
+  2. Formular: Typ, Kategorie, Datum, Betrag, Immobilie, optional Mietobjekt & Mietverhältnis.
+  3. POST → `TransactionController::create()`.
+  4. `TransactionService`:
+     - Leitet Jahr aus Datum ab, schreibt in `year`.
+     - Validiert, dass Immobilie zu currentUser gehört.
+     - Speichert in `immo_transactions`.
+  5. Listenabruf filtert nach `owner_uid`, `year`, `property_id`.
 
-1. User meldet sich bei Nextcloud an (NC-Core).
-2. User klickt auf Immo-App in der Navigation → Aufruf `/apps/immo`.
-3. `PageController` liest:
-   - `IUserSession::getUser()` → `uid`.
-   - `IGroupManager` oder `UserRoleService` → `role`.
-4. Template wird mit Basisdaten geliefert (User, Rolle, CSRF-Token, Übersetzungs-Kontext).
+- **Jahresverteilung**
+  - Beim Speichern oder expliziter Rechenlauf:
+    1. `AccountingService::distributeAnnual()` wird für einen Jahresbetrag (Transaction mit `is_annual=true`) aufgerufen.
+    2. Er holt alle aktiven Mietverhältnisse der Immobilie für das Jahr:
+       - Berechnet belegte Monate je Mietverhältnis.
+    3. Verteilt den Jahresbetrag nach Anteil Monaten:
+       - Speichert Ergebnis in `immo_annual_distribution`.
+    4. Statistiken & Abrechnungen lesen diese Tabelle, um Anteile anzuzeigen.
 
-### 2. Navigation & Inhaltsnachladen (SPA-ähnlich)
+#### 5. Abrechnungen
 
-1. JS initialisiert globale Namespace-Module (`ImmoApp.Main`, `ImmoApp.Properties`, …).
-2. Linkskolonne: Navigationseinträge (Dashboard, Immobilien, Mietobjekte, Mieter, Mietverhältnisse, Einnahmen/Ausgaben, Abrechnungen).
-3. Klick auf Navigation:
-   - Verhindert Vollseiten-Reload.
-   - JS ruft den passenden API-Endpunkt via `fetch`/XHR auf, z. B.:
-     - `/apps/immo/api/dashboard?year=2024`
-   - Header `OCS-APIREQUEST: 'true'` und CSRF-Token werden gesetzt.
-4. Response (JSON) wird verwendet, um den rechten Contentbereich per DOM-Manipulation zu rendern (Templates als JS-Funktionen/Template-Strings).
+- **Erstellen Jahresabrechnung**
+  1. Verwalter wählt Immobilie + Jahr im UI.
+  2. POST → `AccountingController::createReport(propertyId, year)`.
+  3. `AccountingService`:
+     - Aggregiert Transaktionen aus `immo_transactions` (Einnahmen & Ausgaben) für Immobilie+Jahr.
+     - Berücksichtigt Verteilungsinformationen (`immo_annual_distribution`), sofern relevant.
+     - Berechnet Summen pro Kategorie und Netto-Ergebnis.
+     - Berechnet Kennzahlen (z. B. Rendite).
+  4. `ReportFileService`:
+     - Baut Inhalt (z. B. Markdown) mit Summen und Kennzahlen.
+     - Nutzt `IRootFolder`/`IUserFolder`:
+       - Ermittelt User-Verzeichnis des Verwalters.
+       - Stellt sicher, dass `/ImmoApp/Abrechnungen/<Jahr>/<Immobilie>/` existiert.
+       - Speichert Datei `<jahr>_<immobilienname>.md`.
+     - Gibt `file_id` + Pfad zurück.
+  5. `AccountingService` speichert Datensatz in `immo_reports` + `immo_doc_links` (entity_type=report).
+  6. Response an Frontend enthält Liste der Reports für Immobilie+Jahr.
+  7. Download-Link erfolgt direkt über Nextcloud Files (URL aus Pfad/fileid generiert).
 
-### 3. CRUD-Flows
+#### 6. Dashboard
 
-**Beispiel: Immobilie anlegen**
+- **Aufruf Dashboard**
+  1. `#/dashboard` → `DashboardController::getStats(year?, propertyId?)`.
+  2. `DashboardController` orchestriert:
+     - Anzahl Immobilien, Mietobjekte, aktive Mietverhältnisse (via Services).
+     - Summe Soll-Miete im aktuellen Jahr (Summe `rent_cold` aktiver Mietverhältnisse).
+     - Miete/m² für Objekte mit Fläche.
+     - Rendite/Kostendeckung: Summen der Transaktionen (Einnahmen/Ausgaben).
+     - Offene Punkte:
+       - Mietverhältnisse mit Start/Ende im kommenden Zeitraum.
+       - Transaktionen ohne Kategorie/Mietverhältnis.
+  3. JS rendert Kennzahlen und Listen.
 
-1. User (Verwalter) öffnet „Immobilien →
-   Neu“.
-2. JS zeigt Formular (HTML-Form in DOM, Client-Validierung).
-3. Submit:
-   - `POST /apps/immo/api/properties` mit JSON-Body.
-4. Backend:
-   - Prüft Rolle: muss Verwalter sein.
-   - Legt `immo_properties`-Datensatz mit `owner_uid = currentUserUid` an.
-5. Response: neue Immobilie als JSON.
-6. JS aktualisiert Liste (z. B. Eintrag hinzufügen, Detailansicht anzeigen).
+#### 7. Mieter-Sicht
 
-Analoge Flows für Units, Tenants, Tenancies, Transactions.
-
-### 4. Dokumentenverknüpfung
-
-**Beispiel: Mietvertrag an Mietverhältnis anhängen**
-
-1. In der Detailansicht eines Mietverhältnisses klickt Verwalter „Dokument verknüpfen“.
-2. JS öffnet einen file-picker-Dialog:
-   - Nutzung des Nextcloud-Files-Pickers (sofern verfügbar) bzw. einfache Eingabe eines Pfads/Browsen über eigene Liste.
-   - Der gewählte Pfad (z. B. `ImmoApp/Dokumente/Mietvertraege/vertrag_123.pdf`) wird an das Backend gesendet:
-     - `POST /apps/immo/api/attachments`.
-3. Backend:
-   - Validiert, dass `owner_uid` dem currentUser entspricht.
-   - Persistiert `immo_attachments`-Datensatz (`entity_type = 'tenancy'`, `entity_id = tenancyId`, `file_path = ...`).
-4. Detailansicht zeigt Liste der verknüpften Dateien mit Links:
-   - `OC.generateUrl('/f/{fileId}')` oder WebDAV-Pfad/`apps/files/?dir=...&fileid=...`.
-
-### 5. Jahresabrechnung
-
-**Flow: Abrechnung für Immobilie/Jahr**
-
-1. Verwalter wählt Immobilie + Jahr im UI, klickt „Abrechnung erzeugen“.
-2. JS → `POST /apps/immo/api/statements` mit Body `{ propertyId, year }`.
-3. Backend (`StatementService`):
-
-   - Autorisierung: `owner_uid` der Immobilie == currentUser `uid`.
-   - Daten sammeln:
-     - Alle `immo_transactions` für `property_id` + `year`.
-     - Optional: berechnete Verteilungen von `is_annual`-Transaktionen auf Tenancies, wenn in der Abrechnung benötigt.
-   - Summen:
-     - Einnahmen gesamt / pro Kategorie.
-     - Ausgaben gesamt / pro Kategorie.
-     - Netto-Ergebnis.
-   - Kennzahlen:
-     - Miete pro m² (z. B. Durchschnitt über aktive Tenancies des Jahres).
-     - Rendite/Kostendeckung: z. B. `netto / gesamtAusgaben`. In V1: einfache Kennzahl, falls Datenbasis vorhanden.
-   - Markdown/Text generieren, z. B.:
-
-     ```md
-     # Jahresabrechnung 2024 – Musterstraße 1
-
-     ## Stammdaten
-     Immobilie: Musterstraße 1, 12345 Stadt
-     Jahr: 2024
-
-     ## Einnahmen
-     - Miete: 12.000,00 €
-     - Nebenkosten: 3.000,00 €
-     Summe Einnahmen: 15.000,00 €
-
-     ## Ausgaben
-     - Kredit: 4.000,00 €
-     - Instandhaltung: 2.000,00 €
-     Summe Ausgaben: 6.000,00 €
-
-     Netto-Ergebnis: 9.000,00 €
-
-     ...
-     ```
-
-   - Dateiablage:
-     - Mit `IRootFolder` Home des Users holen.
-     - Pfad erzeugen: `/ImmoApp/Abrechnungen/<Jahr>/<Immobilienname oder -id>/`.
-     - Ordnerstruktur anlegen falls nicht vorhanden.
-     - Datei z. B. `<Jahr>_<ImmobilieId>_Abrechnung.md` schreiben.
-   - `immo_statements`-Datensatz anlegen mit `file_path`.
-   - Optional: Attachment an Immobilie über `immo_attachments` (`entity_type='statement'`).
-
-4. Response: Statement-ID und Metadaten.
-5. UI aktualisiert Liste „Abrechnungen“ und zeigt Download-Link, der auf Nextcloud-Dateihandler verweist.
-
-### 6. Dashboard-Berechnung
-
-1. JS ruft `GET /apps/immo/api/dashboard?year=YYYY`.
-2. `DashboardService`:
-   - Ermittelt:
-     - Anzahl Immobilien (`immo_properties` pro owner).
-     - Anzahl Units.
-     - Anzahl aktiver Tenancies:
-       - `start_date <= 31.12.YYYY` und (`end_date` null oder `end_date >= 1.1.YYYY`).
-     - Summe Soll-Kaltmiete im Jahr:
-       - Für alle aktiven Mietverhältnisse wird die monatliche Miete und der aktiven Zeitraum berechnet.
-       - Einfache V1-Variante: Summe der Kaltmiete * Anzahl Monate im Jahr, in denen das Mietverhältnis aktiv ist.
-     - Miete pro m²:
-       - Für mindestens ein Mietobjekt = `base_rent / living_area`.
-   - Optional: offene Punkte (Buchungen ohne Kategorie/Mietverhältnis, Tenancies mit Start/Ende innerhalb nächster X Tage).
-3. JSON zurück → UI rendert Kacheln/Listen.
-
-### 7. Mieter-Portal
-
-1. Mieter loggt sich als NC-User ein (User muss mit `nc_user_uid` in `immo_tenants` verknüpft sein oder über andere Zuordnung).
-2. Immo-App erkennt Rolle „Mieter“:
-   - Dashboard limitiert:
-     - Liste eigener Mietverhältnisse (`tenancy.nc_user_uid` oder Join `tenancies → tenants → tenant.nc_user_uid`).
-     - Liste eigener Abrechnungen (`immo_statements` mit `tenancy_id`/`tenant_id`, sofern V1 schon umgesetzt).
-3. Alle API-Endpunkte prüfen Rolle und filtern entsprechend.
+- **Mieter-Login**
+  1. Mieter meldet sich in Nextcloud an, öffnet Immo App.
+  2. `UserRoleService` identifiziert Rolle „Mieter“.
+  3. UI schaltet in Mieter-Modus:
+     - Nur Menüpunkte „Meine Mietverhältnisse“, „Meine Abrechnungen“, „Meine Dokumente“.
+  4. Backend-Filter:
+     - Mietverhältnisse: `TenancyService` filtert nach `tenant_id`, die dem Mieter-User zugeordnet sind (Mapping notwendig, z.B. via Feld `nc_user_id` in `immo_tenants`)
+     - Abrechnungen: nur Reports, die entweder:
+       - explizit einem Mietverhältnis/Mieter zugeordnet wurden (optional in V1)
+       - oder indirekt über Immobilie/Mietobjekt + Mietverhältnis des Mieters ermittelt werden.
+     - Dokumente: nur `immo_doc_links` für seine Entities.
 
 ---
 
-## Schnittstellen
+### Schnittstellen
 
-### 1. Interne Nextcloud-Schnittstellen (PHP-APIs)
+#### 1. Interne Nextcloud APIs
 
-- **User & Auth**
-  - `OCP\IUserSession` – aktueller User.
-  - `OCP\IUserManager` – User-Auflösung.
-  - `OCP\IGroupManager` – ggf. Rollen via Gruppen.
+- **Benutzer & Session**
+  - `OCP\IUserSession` für aktuellen Benutzer
+  - `OCP\IUserManager` bei Bedarf
+- **Gruppen / Rollen**
+  - `OCP\IGroupManager` zur Ermittlung der Gruppenmitgliedschaft
+- **Dateisystem**
+  - `OCP\Files\IRootFolder`, `OCP\Files\IUserFolder`
+  - Standard Files API, keine direkten FS-Operationen
+- **Datenbank**
+  - `OCP\DB\QueryBuilder\IQueryBuilder` und AppFramework Mappers/Entities
+- **Lokalisierung**
+  - `OCP\IL10N` im Backend
+  - `t()` im Frontend
+- **Logging**
+  - `OCP\ILogger`
 
-- **Filesystem**
-  - `OCP\Files\IRootFolder`:
-    - `getUserFolder($uid)` → Home-Verzeichnis.
-    - `newFolder`, `newFile`, `nodeExists`, `get` etc.
-  - Pfade ausschließlich im User-Kontext (keine globale Filesystem-Manipulation in anderen Usern).
+#### 2. HTTP-APIs (App-interne Endpunkte)
 
-- **Datenbank / AppFramework**
-  - `OCP\AppFramework\Db\Entity`, `Mapper`.
-  - DB-Schema in `appinfo/database.xml`.
+Alle Routen in `appinfo/routes.php`, Beispiel:
 
-- **L10N**
-  - `OCP\IL10N` – Übersetzungen im Backend.
-  - Im JS: `t('immo', '...')`.
+- Dashboard
+  - `GET /apps/immoapp/dashboard/stats`
+- Immobilien
+  - `GET /apps/immoapp/properties`
+  - `GET /apps/immoapp/properties/{id}`
+  - `POST /apps/immoapp/properties`
+  - `PUT /apps/immoapp/properties/{id}`
+  - `DELETE /apps/immoapp/properties/{id}`
+- Mietobjekte
+  - analog, ggf. mit `propertyId` als Query-Parameter
+- Mieter
+  - `GET /apps/immoapp/tenants`
+  - etc.
+- Mietverhältnisse
+  - `GET /apps/immoapp/tenancies?unitId=&tenantId=`
+- Transaktionen
+  - `GET /apps/immoapp/transactions?year=&propertyId=`
+- Dokumentverknüpfung
+  - `POST /apps/immoapp/doc-links` (entity_type, entity_id, file_id/path)
+  - `GET /apps/immoapp/doc-links/{entityType}/{entityId}`
+- Abrechnungen
+  - `POST /apps/immoapp/reports` (propertyId, year)
+  - `GET /apps/immoapp/reports?propertyId=&year=`
 
-### 2. HTTP/JSON-API (intern für das Frontend)
-
-Beispiele (alle unter `/apps/immo/api`):
-
-- `GET /properties` – Liste Immobilien.
-- `POST /properties`.
-- `GET /properties/{id}`.
-- `PUT /properties/{id}`.
-- `DELETE /properties/{id}`.
-
-Analog für `units`, `tenants`, `tenancies`, `transactions`, `attachments`, `statements`, `dashboard`.
-
-Eigenschaften:
-
-- Authentifizierung: NC Session / CSRF-Token.
-- Content-Type: `application/json`.
-- Header: `OCS-APIREQUEST: 'true'` (vom Frontend gesetzt).
-- Fehler: HTTP-Statuscodes, JSON mit Fehlermeldung (über L10N).
-
-### 3. Frontend-Integration
-
-- Grund-Template:
-  - Eingebunden über `\OCP\AppFramework\Http\TemplateResponse`.
-  - Enthält:
-    - App-Navigation (HTML).
-    - Platzhalter `<div id="immo-content"></div>` für Content.
-    - `<script>` für Haupt-JS (ES6-Datei unter `js/`).
-- JS-Modulstruktur:
-  - `js/main.js` → Initialisierung, Routing der Unteransichten.
-  - `js/services/api.js` → generische AJAX-Aufrufe (mit CSRF, OCS-Header).
-  - `js/views/dashboard.js`, `js/views/properties.js`, etc.
+**Hinweis:** Es werden keine OCS-Routen genutzt; alle Endpunkte sind reguläre App-Routen.  
+Alle AJAX-Requests setzen Header `OCS-APIREQUEST: true`, um CSRF-/Same-Origin-Handling mit Nextcloud kompatibel zu halten.
 
 ---
 
-## Sicherheitsanforderungen
+### Sicherheitsanforderungen
 
 1. **Authentifizierung**
-   - Ausschließlich über NC-Login (Session & CSRF).
-   - Keine eigenen Logins/Passwörter.
+   - Vollständig über Nextcloud-Login gesteuert.
+   - Kein eigener Auth-Mechanismus.
 
-2. **Autorisierung & Multi-Tenancy**
-   - Strikter Ownership-Check:
-     - Jede Immobilie, Unit, Tenant, Tenancy, Transaction, Statement hat `owner_uid`.
-     - Alle Queries filtern immer auf `owner_uid = currentUserUid` (Ausnahme: Mieterrolle, siehe unten).
-   - Verwalter:
-     - Vollzugriff auf eigene Daten.
-   - Mieter:
-     - Nur lesender Zugriff:
-       - Auf Tenancies, die direkt mit ihm verknüpft sind (via `tenant_id` + `tenant.nc_user_uid = currentUserUid`).
-       - Auf Statements, die ihm zugeordnet sind.
-       - Auf Attachments, die zu seinen Tenancies/Statements gehören.
-     - Kein Zugriff auf andere Mieter, Immobilien oder fremde Tenancies.
+2. **Autorisierung & Rollen**
+   - Rollen „Verwalter“ und „Mieter“ basierend auf Nextcloud-Gruppen oder App-Konfiguration.
+   - Jeder Controller prüft:
+     - Rolle „Verwalter“ für:
+       - Stammdaten-CRUD (Immobilien, Mietobjekte, Mieter, Mietverhältnisse, Transaktionen)
+       - Erstellen von Abrechnungen
+     - Rolle „Mieter“ nur für:
+       - Lesen der eigenen Mietverhältnisse
+       - Lesen / Download eigener Abrechnungen
+       - Lesen zugehöriger Dokumente.
 
-3. **Datenvalidierung**
-   - Backend-validierung aller Felder:
-     - Pflichtfelder (z. B. Name, start_date, amount, etc.).
-     - Typ/Ranges (positive Beträge, Datumformat).
-   - Serverseitige Sanitization von Freitextfeldern (z. B. `description`) gegen XSS.
-   - Nutzung von AppFramework-DB-Abstraction zur Vermeidung von SQL-Injection.
+3. **Mandantentrennung**
+   - Alle Datenzugriffe sind auf `owner_uid` / Kontext-IDs eingeschränkt:
+     - Verwalter sieht ausschließlich eigene Immobilien und alle abhängigen Entitäten.
+     - Mieter sieht nur Entitäten, die mit seinem Mieter-Datensatz verknüpft sind.
+   - Explizite Checks im Service-Layer:
+     - Zugriff auf `property_id` prüft `owner_uid == currentUser`.
+     - Zugriff auf `tenant_id` prüft, dass dieser über Mieterrolle mit currentUser verknüpft ist.
 
-4. **Dateisystemzugriff**
-   - Access nur im Home-Filesystem des aktuellen Users:
-     - Keine Pfade zu anderen User-Homes.
-   - Pfad-Validierung:
-     - Kein „..“-Traversal.
-   - Verwendung von `IRootFolder` gegenüber direktem Filesystem.
+4. **Dokumentenverknüpfung**
+   - Es werden nur Referenzen auf bereits vorhandene Files im Dateisystem gespeichert.
+   - Kein Manipulieren von Dateirechten: Zugriffsrechte bleiben bei Nextcloud Files.
+   - App zeigt nur Links; ob Datei geöffnet werden kann, entscheidet Nextcloud anhand Files-Berechtigungen.
 
-5. **Transport & CSRF**
-   - Kommunikation über HTTPS (hostseitig erwartet).
-   - Alle mutierenden Requests mit gültigem CSRF-Token.
-   - `#[NoCSRFRequired]` nur, wenn unbedingt nötig und dann nur für reine Lese-Endpunkte ohne sensible Daten (im Zweifel vermeiden).
+5. **CSRF / XSS / Input-Validierung**
+   - Controller nutzen AppFramework Standard-CSRF-Schutz; `#[NoCSRFRequired]` nur für reine GET-APIs, falls nötig und sicher.
+   - Parameter-Validierung im Backend (Date-Format, Beträge, IDs).
+   - Frontend-Rendering mit Vorsicht:
+     - HTML escaping in Templates, keine ungeprüfte innerHTML-Zuweisung mit Benutzereingaben.
+   - Kein Fremd-JS oder externe Ressourcen.
 
-6. **Datenschutz**
-   - Personenbezogene Daten (Mieter) werden nur im Kontext des jeweiligen Verwalters gespeichert und angezeigt.
-   - Keine Übertragung an Drittsysteme.
-   - Logging minimieren, keine sensiblen Daten in Logfiles.
+6. **Transport-Sicherheit**
+   - Nutzung der Nextcloud-Instanz über HTTPS (Voraussetzung durch Plattform).
+   - Keine zusätzlichen Ports oder Dienste.
+
+7. **Logging & Fehler**
+   - Fehler werden im Backend via ILogger geloggt, ohne sensible Daten (z. B. keine vollständigen personenbezogenen Datensätze) zu loggen.
+   - Fehlercodes im API (4xx/5xx) + generische Meldungen für Client.
+
+8. **Datenschutz**
+   - Personenbezogene Daten (Mieter) werden in App-eigener DB gespeichert.
+   - In V1 keine automatischen Lösch-/Anonymisierungsprozesse, aber klare Zuordnung je Verwalter.
+   - Option für spätere Erweiterungen (z.B. DSGVO-Funktionen).
+
 
 ---
 
-## Risiken
+### Risiken
 
-1. **Komplexität der Verteilungslogik**
-   - Risiko: Unterjährige Mietwechsel + Jahresbetragsverteilung können schnell komplex werden.
+1. **Rollen-/Rechtemodell**
+   - Risiko: falsche Rollenprüfung könnte dazu führen, dass Mieter fremde Daten sehen oder Verwalter in Daten anderer Verwalter eingreifen können.
    - Mitigation:
-     - In V1 auf einfaches Modell beschränken:
-       - Monatsweise Zuordnung: Anzahl belegter Monate pro Tenancy im Jahr.
-       - Anteil = Jahresbetrag * (Monate Tenancy / Summe aller Tenancy-Monate).
-       - Nur für Statistik, nicht als echte Buchungen.
+     - Zentrale `UserRoleService` + konsequente Verwendung in allen Services.
+     - Unit-Tests für Zugriffslogik.
+     - Striktes Filtern über `owner_uid`.
 
-2. **Mehrmandanten-Isolation**
-   - Risiko: Fehlerhafte Ownership-Prüfung könnte dazu führen, dass ein Verwalter Daten eines anderen sieht.
+2. **Mapping Mieter ↔ Nextcloud-User**
+   - Anforderung: Mieter (App-Datensatz) sollen in NC als User existieren.
+   - Risiko: Inkonsistenz, wenn z.B. Mieter gelöscht / umbenannt werden.
    - Mitigation:
-     - Zentralisierte Prüfungen in Services.
-     - Unit-Tests für alle Service-Methoden mit Szenarien „fremde Daten“.
+     - Feld `nc_user_id` in `immo_tenants` einführen (optional).
+     - Mieter-Ansicht basiert auf `nc_user_id = currentUser`, nicht nur auf name/email.
+     - Admin-Hinweise in UI für sauberes Anlegen/Verknüpfen von Mietern.
 
-3. **Rollen-Mapping Mieter ↔ Nextcloud-User**
-   - Risiko: Falsche Zuordnung, Mieter sieht Daten eines anderen Mieters.
+3. **Performance bei Auswertungen**
+   - Risiko: Aggregationen über viele Transaktionen / Mietverhältnisse können langsam werden.
    - Mitigation:
-     - Klarer Mechanismus: ein Mieter-Datensatz hat optional `nc_user_uid`.
-     - UI/Administration: Zuordnung muss explizit erfolgen (kein Auto-Mapping).
-     - Alle Mieter-API-Aufrufe filtern immer nach `tenant.nc_user_uid = currentUserUid`.
+     - Indizes auf `year`, `property_id`, `owner_uid`.
+     - Aggregationen weitgehend per SQL statt PHP-Schleifen.
+     - Begrenzung der Datenmenge (z. B. Pagination, Jahresfilter zwingend).
 
-4. **Dateisystem-Pfade & Zugriffe**
-   - Risiko: Falsche Pfadberechnung könnte unerwünschte Dateien überschreiben oder unzugängliche Pfade nutzen.
+4. **Komplexität Jahresverteilung**
+   - Risiko: Fehler in der Verteil-Logik (Monatsberechnung, Randsituationen) → falsche Abrechnung.
    - Mitigation:
-     - Nutzung von `getUserFolder()->newFolder()/newFile()` statt manueller Pfadstrings, wo möglich.
-     - Pfade konsistent über Utility-Funktionen generieren.
-     - Keine Annahmen über NC-internen `files/`-Subpfad.
+     - Klar definierte Regeln (Monate inkl./exkl. Start/Ende).
+     - Tests für typische und Randfälle (Wechsel zum Monatsanfang/-ende, parallele Mietverhältnisse).
+     - UI-Hinweise, dass Verteilung in V1 eine einfache Näherung ist.
 
-5. **Performance bei großen Datenmengen**
-   - Risiko: Viele Transaktionen/Einheiten je Verwalter könnten Dashboard/Abrechnungsberechnung verlangsamen.
+5. **Dateiablage & Pfade**
+   - Risiko: Inkonsistente Pfadstrukturen oder falsche Berechnungen des Report-Pfads.
    - Mitigation:
-     - Frühzeitige Nutzung von Aggregationsqueries (SUM, GROUP BY) statt In-Memory-Aufsummierung.
-     - Wo nötig, einfache Cachingfelder in `immo_statements` (Summen).
-     - Pagination und Filter für Listen.
+     - Zentraler `ReportFileService` als einzige Stelle, die Pfade erzeugt.
+     - Nutzung von Nextcloud-API statt manueller Pfadlogik (Folder suchen/erstellen).
+     - Keine Annahmen über physische Pfade.
 
-6. **UI-Komplexität ohne Framework**
-   - Risiko: SPA-ähnliche UI mit Vanilla JS kann unübersichtlich werden.
+6. **Single-Page-Navigation**
+   - Risiko: inkonsistente UI-Zustände bei Back-Button / Reload; Fehler bei Hash-Routing.
    - Mitigation:
-     - Strikte Modul-/Namespace-Struktur (z. B. `ImmoApp.Views.*`, `ImmoApp.Services.*`).
-     - Wiederverwendbare UI-Hilfsfunktionen (Tabellenrenderer, Formbuilder).
+     - Simpler Router (Hash-basierend) mit klarer Übergangslogik.
+     - Fallback: Aufruf direkt aus Navigation lädt Standard-Dashboard.
+     - Keine tief verschachtelten Zustände im MVP.
 
-7. **Fehlende Internationalisierung**
-   - Risiko: Nur Euro & einfache Strings in V1 – spätere Internationalisierung aufwändig.
+7. **Abhängigkeit von Nextcloud-Version 32**
+   - Risiko: Nutzung von APIs, die sich in zukünftigen Versionen ändern könnten.
    - Mitigation:
-     - Konsequent `IL10N`/`t()` nutzen, keine Hardcoded-Strings.
-     - Beträge immer als numeric Value in DB, Formatierung im UI (z. B. `€ 1.234,56`) über zentrale Hilfsfunktion.
+     - Strikte Verwendung der offiziellen OCP-Interfaces.
+     - Dokumentieren der minimal benötigten Nextcloud-Version in `info.xml`.
+     - Zukunftsfähigkeit durch Vermeidung interner APIs.
 
-Diese Architektur deckt die V1-Anforderungen ab und bleibt konform mit den technischen Leitlinien für Nextcloud (NC 32, AppFramework, Vanilla JS, keine Core-Änderungen, keine externen Composer-Pakete).
+---
+
+Dieses technische Konzept bildet die Basis für die Implementierung der Immo App V1 innerhalb von Nextcloud 32 unter Einhaltung der vorgegebenen technischen Guidelines und der funktionalen Anforderungen des Anforderungsdokuments.

@@ -1,1520 +1,1138 @@
-Komponentenplan und Beispielcode sind exemplarisch und auf Kernflüsse reduziert (Dashboard, Immobilien CRUD, Statements, Basis-Frontend). Du kannst das Muster 1:1 auf Units, Tenants etc. übertragen.
+## Komponentenplan (nur Frontend)
 
----
+### 1. Komponenten (Module & Unter-Module)
 
-## Komponenten
+Globales Namespace-Objekt:
 
-### Backend (PHP / Nextcloud)
+```js
+window.ImmoApp = window.ImmoApp || {};
+```
 
-**App-Struktur (vereinfacht)**
+#### 1.1 Core
 
-- `appinfo/`
-  - `info.xml`
-  - `routes.php`
-  - `database.xml`
-- `lib/AppInfo/Application.php`
-- `lib/Controller/`
-  - `PageController.php` (UI)
-  - `PropertyController.php`
-  - `DashboardController.php`
-  - `StatementController.php`
-- `lib/Db/`
-  - `Property.php`
-  - `PropertyMapper.php`
-  - `Statement.php`
-  - `StatementMapper.php`
-- `lib/Service/`
-  - `PropertyService.php`
-  - `DashboardService.php`
-  - `StatementService.php`
-  - `RoleService.php`
-- `templates/main.php`
-- `js/`
-  - `main.js`
-  - `services/api.js`
-  - `views/dashboard.js`
-  - `views/properties.js`
-  - `views/statements.js`
-  - `utils/ui.js`
+- `ImmoApp.App`
+  - Initialisiert App beim Laden des Templates (`DOMContentLoaded`).
+  - Ruft `ImmoApp.Api.me()` auf, lädt Benutzerrolle/Konfiguration.
+  - Initialisiert Router, setzt Start-Route (z. B. `#/dashboard` oder `#/my-tenancies` für Mieter).
+  - Delegiert Navigation-Klicks an Router.
 
----
+- `ImmoApp.Router`
+  - Hash-basierter Router (`#/dashboard`, `#/properties`, `#/properties/:id`, …).
+  - Mappt Route → View-Module + View-Mode (`list`, `detail`, `edit`, `new`).
+  - Übergibt Parameter (ID, Filter) an View.
+  - Kümmert sich um 404/„View nicht erlaubt“.
 
-## Datenlogik
+- `ImmoApp.Api`
+  - Wrapper um `fetch`:
+    - Basis-URL: `/apps/immoapp/api`.
+    - Setzt `OCS-APIREQUEST: 'true'`.
+    - JSON-Parsing, Fehlerbehandlung, einheitliche Fehlerrückgabe.
+  - Methodensammlung:
+    - `me()`
+    - `getDashboardStats(params)`
+    - `getProperties()`, `getProperty(id)`, `createProperty(data)`, `updateProperty(id, data)`, `deleteProperty(id)`
+    - `getUnits(params)`, `createUnit(data)`, …
+    - `getTenants()`, `createTenant(data)`, …
+    - `getTenancies(params)`, `createTenancy(data)`, …
+    - `getTransactions(params)`, `createTransaction(data)`
+    - `getDocLinks(entityType, entityId)`, `createDocLink(data)`
+    - `getReports(params)`, `createReport(data)`
 
-### Entities & Mapper (Beispiele)
+- `ImmoApp.State`
+  - Globaler UI- und Session-State (im RAM, kein Redux o. ä.):
+    - `currentUser` (`userId`, `role`, `config`).
+    - `ui`: `currentRoute`, `filters` (z. B. `year`, `propertyId`).
+    - Caches: `propertiesById`, `unitsById`, optional `tenantsById` für schnelle Lookups.
 
-**Immobilien (`immo_properties`)**
+- `ImmoApp.Util`
+  - Helferfunktionen:
+    - `formatDate(dateStr)`
+    - `formatMoney(amount)`
+    - `escapeHtml(str)`
+    - Simple templating: `html(strings, ...values)` mit automatischem Escape.
+    - Status-Bestimmung (optional, falls clientseitig nötig).
 
-- Entity `Property`:
-  - `id`, `ownerUid`, `name`, `street`, `zip`, `city`, `country`, `type`, `description`, `createdAt`, `updatedAt`
-- Mapper `PropertyMapper`:
-  - `findByIdForOwner(int $id, string $uid)`
-  - `findAllForOwner(string $uid)`
-  - `insert(Property $property)`
-  - `update(Property $property)`
-  - `delete(Property $property)`
+#### 1.2 Views
 
-**Abrechnungen (`immo_statements`)**
+Jede View ist ein eigenes Modul mit der Signatur:
 
-- Entity `Statement`:
-  - `id`, `ownerUid`, `year`, `propertyId`, `filePath`, `totalIncome`, `totalExpense`, `netResult`, `createdAt`
-- Mapper `StatementMapper`:
-  - `findByOwnerAndFilter(string $uid, ?int $year, ?int $propertyId)`
-  - `insert(Statement $statement)`
+```js
+ImmoApp.Views.X = (function() {
+  function init(rootEl, routeParams, queryParams) {}
+  function destroy() {}
+  return { init, destroy };
+})();
+```
 
-### Services
+Gemeinsame Konvention:
+- `rootEl`: DOM-Element (Content-Container).
+- `routeParams`: z. B. `{ id: 1 }`.
+- `queryParams`: z. B. `{ year: 2025 }`.
 
-**RoleService**
-
-- Liefert Rolle des aktuellen Users (`manager` oder `tenant`):
-  - Primär über Gruppen (`immo_admin`, `immo_tenant`).
-  - Optional Fallback DB-Tabelle `immo_user_roles`.
-
-**PropertyService**
-
-- Kümmert sich um:
-  - Ownership-Filter (immer `owner_uid = currentUser`).
-  - Validierung (Pflichtfelder, Längen).
-  - CRUD-Operationen.
-
-**DashboardService**
-
-- Aggregiert Kennzahlen:
-  - Anzahl Properties/Units/aktive Tenancies.
-  - Summe Soll-Kaltmiete (vereinfachtes Modell, z. B. aus Tenancies).
-  - Offene Punkte (z. B. Tenancies mit Start/Ende im Zeitraum, Buchungen ohne Kategorie).
-
-**StatementService**
-
-- Prüft Eigentümer.
-- Aggregiert Transaktionen pro Immobilie/Jahr.
-- Berechnet Summen.
-- Generiert Text/Markdown.
-- Speichert Datei per `IRootFolder`.
-- Persistiert Statement in `immo_statements`.
-
----
-
-## Schnittstellen
-
-### HTTP-API (JSON, intern für Frontend)
-
-Basis-Pfad: `/apps/immo/api`
-
-- **Dashboard**
-  - `GET /dashboard?year=2024`
-    - Response: `{ counts: {...}, kpis: {...}, openItems: [...] }`
-- **Properties**
-  - `GET /properties`
-  - `POST /properties`
-  - `GET /properties/{id}`
-  - `PUT /properties/{id}`
-  - `DELETE /properties/{id}`
-- **Statements**
-  - `GET /statements?year=2024&propertyId=1`
-  - `POST /statements` (Body: `{ year, propertyId }`)
-
-Alle:
-- benötigen gültige Session & CSRF (außer reinen GETs, wenn du sie explizit CSRF-frei machst).
-- JSON-Body.
-- Header: `OCS-APIREQUEST: 'true'`.
-
-### Frontend-Schnittstelle (JS-Module)
-
-- `ImmoApp.Api`:
-  - `request(method, url, body)`
-  - `getDashboard(year)`
-  - `getProperties()`
-  - `createProperty(data)`
-  - `updateProperty(id, data)`
-  - `deleteProperty(id)`
-  - `getStatements(filter)`
-  - `createStatement(data)`
+**Views für Verwalter (`manager`):**
 
 - `ImmoApp.Views.Dashboard`
-  - `init()`
-  - `render(year)`
+  - Formularleiste: Jahr (Dropdown + aktuelles Jahr), optional Immobilie-Dropdown.
+  - Zeigt Kennzahlen-Kacheln, einfache Einnahmen/Ausgaben-Übersicht und offene Punkte.
+  - Nutzt `GET /dashboard/stats`.
+
 - `ImmoApp.Views.Properties`
-  - `init()`
-  - `renderList()`
-  - `renderDetail(property)`
-- `ImmoApp.Views.Statements`
-  - `renderList()`
-  - `renderCreateDialog()`
+  - Submodes:
+    - `list`: Tabelle aller Properties, Button „Neu“.
+    - `detail`: Kopf mit Stammdaten, Tabs: „Mietobjekte“, „Kennzahlen“, „Abrechnungen“, „Dokumente“.
+    - `form`: Neu/Bearbeiten Property.
+  - API:
+    - Liste & Detail: `GET /properties`, `GET /properties/{id}`.
+    - CRUD: `POST`, `PUT`, `DELETE`.
 
-- `ImmoApp.Main`
-  - Steuert Navigation, initialisiert Views, History/Hash-Routing.
+- `ImmoApp.Views.Units`
+  - Liste aller Units (optional Filter `propertyId`).
+  - Optional eingebettet in Property-Detail: `GET /units?propertyId=x`.
+  - Form: Neu/Bearbeiten.
 
----
+- `ImmoApp.Views.Tenants`
+  - Liste mit Suche.
+  - Detail mit Stammdaten, Mietverhältnissen (via `GET /tenancies?tenantId=...`), Dokumenten.
+  - Form: Neu/Bearbeiten.
 
-## Beispielcode
+- `ImmoApp.Views.Tenancies`
+  - Liste mit Filtern (Jahr, Status, Immobilie).
+  - Detail mit Stammdaten, verknüpftem Mieter/Unit, Dokumenten.
+  - Form: Neues/ Bearbeiten Mietverhältnis.
+  - API: `GET /tenancies`, `POST /tenancies`.
 
-### 1. App-Registrierung / Routen
+- `ImmoApp.Views.Transactions`
+  - Liste Einnahmen/Ausgaben mit Filters:
+    - Jahr (erforderlich), Immobilie, Typ, Kategorie.
+  - Buttons: „Neue Einnahme“, „Neue Ausgabe“.
+  - Form: Transaktion anlegen.
+  - API: `GET /transactions`, `POST /transactions`.
 
-**`appinfo/info.xml` (Auszug)**
+- `ImmoApp.Views.Accounting`
+  - Oben: Filter Immobilie + Jahr.
+  - Abschnitt: Liste vorhandener Reports (via `GET /reports`).
+  - Button „Abrechnung erstellen“ → POST `/reports` → aktualisiert Liste.
+  - Download-Links basierend auf `path` (Nextcloud-URL).
 
-```xml
-<?xml version="1.0"?>
-<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <id>immo</id>
-  <name>Immo</name>
-  <summary>Immobilienverwaltung</summary>
-  <version>0.1.0</version>
-  <description>Verwaltung von Immobilien, Mietern und Abrechnungen</description>
-  <namespace>Immo</namespace>
-  <category>tools</category>
-  <licence>agpl</licence>
-  <author>Your Name</author>
-  <dependencies>
-    <nextcloud min-version="32" max-version="32"/>
-  </dependencies>
-</info>
-```
+- `ImmoApp.Views.DocLinks` (meist eingebettet)
+  - Wird in anderen View-Details genutzt, bekommt `entityType` & `entityId`.
+  - Listet Dokumente via `GET /doc-links/{type}/{id}`.
+  - Button „Dokument verknüpfen“ → einfacher Dialog mit Eingabe von File-Pfad oder File-ID (für V1).
+  - Aufruf `POST /doc-links`.
 
-**`appinfo/routes.php`**
+**Views für Mieter (`tenant`):**
 
-```php
-<?php
+- `ImmoApp.Views.MyTenancies`
+  - Liste eigener Mietverhältnisse: `GET /tenancies?tenantId=...` (Backend interpretiert).  
+  - Klick → Detail-Bereich ähnlich Tenancy-Detail, aber read-only.
 
-return [
-    'routes' => [
-        // Page
-        ['name' => 'page#index', 'url' => '/', 'verb' => 'GET'],
+- `ImmoApp.Views.MyReports`
+  - Liste eigener Abrechnungen: `GET /reports?tenantId=...` oder implizit.
+  - Download-Link.
 
-        // Dashboard
-        ['name' => 'dashboard#index', 'url' => '/api/dashboard', 'verb' => 'GET'],
-
-        // Properties
-        ['name' => 'property#index',  'url' => '/api/properties',          'verb' => 'GET'],
-        ['name' => 'property#create', 'url' => '/api/properties',          'verb' => 'POST'],
-        ['name' => 'property#show',   'url' => '/api/properties/{id}',     'verb' => 'GET'],
-        ['name' => 'property#update', 'url' => '/api/properties/{id}',     'verb' => 'PUT'],
-        ['name' => 'property#destroy','url' => '/api/properties/{id}',     'verb' => 'DELETE'],
-
-        // Statements
-        ['name' => 'statement#index', 'url' => '/api/statements', 'verb' => 'GET'],
-        ['name' => 'statement#create','url' => '/api/statements', 'verb' => 'POST'],
-    ]
-];
-```
-
-**`lib/AppInfo/Application.php`**
-
-```php
-<?php
-
-namespace OCA\Immo\AppInfo;
-
-use OCP\AppFramework\App;
-use OCP\AppFramework\Bootstrap\IBootstrap;
-use OCP\AppFramework\Bootstrap\IRegistrationContext;
-use OCP\AppFramework\Bootstrap\IBootContext;
-
-use OCA\Immo\Service\PropertyService;
-use OCA\Immo\Service\DashboardService;
-use OCA\Immo\Service\StatementService;
-use OCA\Immo\Service\RoleService;
-use OCA\Immo\Db\PropertyMapper;
-use OCA\Immo\Db\StatementMapper;
-
-class Application extends App implements IBootstrap {
-
-    public const APP_ID = 'immo';
-
-    public function __construct(array $urlParams = []) {
-        parent::__construct(self::APP_ID, $urlParams);
-    }
-
-    public function register(IRegistrationContext $context): void {
-        $context->registerService(PropertyMapper::class, function($c) {
-            return new PropertyMapper(
-                $c->getServer()->getDatabaseConnection(),
-                $c->getServer()->getConfig()
-            );
-        });
-
-        $context->registerService(PropertyService::class, function($c) {
-            return new PropertyService(
-                $c->get(PropertyMapper::class),
-                $c->getServer()->getUserSession(),
-                $c->getServer()->getL10N(self::APP_ID)
-            );
-        });
-
-        $context->registerService(RoleService::class, function($c) {
-            return new RoleService(
-                $c->getServer()->getGroupManager(),
-                $c->getServer()->getUserSession()
-            );
-        });
-
-        $context->registerService(DashboardService::class, function($c) {
-            return new DashboardService(
-                $c->getServer()->getUserSession(),
-                $c->getServer()->getL10N(self::APP_ID)
-                // Weitere Mapper (TenancyMapper, TransactionMapper, PropertyMapper) hier injizieren
-            );
-        });
-
-        $context->registerService(StatementMapper::class, function($c) {
-            return new StatementMapper(
-                $c->getServer()->getDatabaseConnection()
-            );
-        });
-
-        $context->registerService(StatementService::class, function($c) {
-            return new StatementService(
-                $c->getServer()->getUserSession(),
-                $c->getServer()->getL10N(self::APP_ID),
-                $c->getServer()->get(IRootFolder::class),
-                $c->get(PropertyMapper::class),
-                $c->get(StatementMapper::class)
-                // plus TransactionMapper etc.
-            );
-        });
-    }
-
-    public function boot(IBootContext $context): void {
-        // Globale Boot-Logik falls nötig (z.B. Middleware registrieren)
-    }
-}
-```
+- Optional: `ImmoApp.Views.MyDashboard`
+  - Einfache Anzeige: „Aktuelles Mietverhältnis“, letzte Abrechnung, Dokumente.
 
 ---
 
-### 2. Datenbank-Entities / Mapper
+## States
 
-**`appinfo/database.xml` (Auszug für Properties & Statements)**
+### 2.1 Globaler State (`ImmoApp.State`)
 
-```xml
-<?xml version="1.0"?>
-<database>
-  <table name="immo_properties">
-    <field name="id" type="integer" length="4">
-      <primary>true</primary>
-      <autoincrement>true</autoincrement>
-    </field>
-    <field name="owner_uid" type="string" length="64" notnull="true"/>
-    <field name="name" type="string" length="255" notnull="true"/>
-    <field name="street" type="string" length="255" notnull="false"/>
-    <field name="zip" type="string" length="16" notnull="false"/>
-    <field name="city" type="string" length="255" notnull="false"/>
-    <field name="country" type="string" length="64" notnull="false"/>
-    <field name="type" type="string" length="64" notnull="false"/>
-    <field name="description" type="text" notnull="false"/>
-    <field name="created_at" type="integer" length="4" notnull="true"/>
-    <field name="updated_at" type="integer" length="4" notnull="true"/>
-    <index name="immo_prop_owner_uid_idx">
-      <field>owner_uid</field>
-    </index>
-  </table>
-
-  <table name="immo_statements">
-    <field name="id" type="integer" length="4">
-      <primary>true</primary>
-      <autoincrement>true</autoincrement>
-    </field>
-    <field name="owner_uid" type="string" length="64" notnull="true"/>
-    <field name="year" type="integer" length="4" notnull="true"/>
-    <field name="property_id" type="integer" length="4" notnull="true"/>
-    <field name="file_path" type="string" length="512" notnull="true"/>
-    <field name="total_income" type="decimal" length="20,4" notnull="false"/>
-    <field name="total_expense" type="decimal" length="20,4" notnull="false"/>
-    <field name="net_result" type="decimal" length="20,4" notnull="false"/>
-    <field name="created_at" type="integer" length="4" notnull="true"/>
-    <index name="immo_stmt_owner_year_idx">
-      <field>owner_uid</field>
-      <field>year</field>
-    </index>
-  </table>
-</database>
+```js
+ImmoApp.State = {
+  currentUser: {
+    userId: null,
+    role: 'none', // 'manager' | 'tenant' | 'none'
+    config: {
+      defaultYear: (new Date()).getFullYear()
+    }
+  },
+  ui: {
+    currentRoute: '',
+    currentView: null,   // Referenz auf aktives View-Modul
+    filters: {
+      year: null,
+      propertyId: null
+    },
+    loading: false,
+    lastError: null
+  },
+  cache: {
+    properties: new Map(), // id -> object
+    units: new Map(),      // id -> object
+    tenants: new Map()     // id -> object
+  }
+};
 ```
 
-**`lib/Db/Property.php`**
-
-```php
-<?php
-
-namespace OCA\Immo\Db;
-
-use OCP\AppFramework\Db\Entity;
-
-/**
- * @method int getId()
- * @method void setId(int $id)
- * @method string getOwnerUid()
- * @method void setOwnerUid(string $uid)
- * @method string getName()
- * @method void setName(string $name)
- * @method string getStreet()
- * @method void setStreet(string $street)
- * @method string getZip()
- * @method void setZip(string $zip)
- * @method string getCity()
- * @method void setCity(string $city)
- * @method string getCountry()
- * @method void setCountry(string $country)
- * @method string getType()
- * @method void setType(string $type)
- * @method string getDescription()
- * @method void setDescription(string $description)
- * @method int getCreatedAt()
- * @method void setCreatedAt(int $timestamp)
- * @method int getUpdatedAt()
- * @method void setUpdatedAt(int $timestamp)
- */
-class Property extends Entity {
-    public function __construct() {
-        $this->addType('id', 'int');
-        $this->addType('ownerUid', 'string');
-        $this->addType('name', 'string');
-        $this->addType('street', 'string');
-        $this->addType('zip', 'string');
-        $this->addType('city', 'string');
-        $this->addType('country', 'string');
-        $this->addType('type', 'string');
-        $this->addType('description', 'string');
-        $this->addType('createdAt', 'int');
-        $this->addType('updatedAt', 'int');
-    }
-}
-```
-
-**`lib/Db/PropertyMapper.php`**
-
-```php
-<?php
-
-namespace OCA\Immo\Db;
-
-use OCP\AppFramework\Db\QBMapper;
-use OCP\IDBConnection;
-
-class PropertyMapper extends QBMapper {
-
-    public function __construct(IDBConnection $db) {
-        parent::__construct($db, 'immo_properties', Property::class);
-    }
-
-    public function findAllForOwner(string $ownerUid): array {
-        $qb = $this->db->getQueryBuilder();
-        $qb->select('*')
-           ->from($this->getTableName())
-           ->where($qb->expr()->eq('owner_uid', $qb->createNamedParameter($ownerUid)));
-        return $this->findEntities($qb);
-    }
-
-    public function findByIdForOwner(int $id, string $ownerUid): ?Property {
-        $qb = $this->db->getQueryBuilder();
-        $qb->select('*')
-           ->from($this->getTableName())
-           ->where($qb->expr()->eq('id', $qb->createNamedParameter($id)))
-           ->andWhere($qb->expr()->eq('owner_uid', $qb->createNamedParameter($ownerUid)))
-           ->setMaxResults(1);
-        $entities = $this->findEntities($qb);
-        return $entities[0] ?? null;
-    }
-}
-```
+State ist rein im JS gehalten und wird bei Reload verloren; das ist für V1 ok.
 
 ---
 
-### 3. Services
+## Views & Navigation (Routing)
 
-**`lib/Service/RoleService.php`**
+### 3.1 Routen-Definition (Beispiele)
 
-```php
-<?php
+```js
+// Logische Routen (Hash-Basis)
+const routes = {
+  '#/dashboard': { view: ImmoApp.Views.Dashboard },
+  '#/properties': { view: ImmoApp.Views.Properties, mode: 'list' },
+  '#/properties/new': { view: ImmoApp.Views.Properties, mode: 'new' },
+  '#/properties/:id': { view: ImmoApp.Views.Properties, mode: 'detail' },
+  '#/properties/:id/edit': { view: ImmoApp.Views.Properties, mode: 'edit' },
 
-namespace OCA\Immo\Service;
+  '#/units': { view: ImmoApp.Views.Units, mode: 'list' },
+  '#/tenants': { view: ImmoApp.Views.Tenants, mode: 'list' },
+  '#/tenancies': { view: ImmoApp.Views.Tenancies, mode: 'list' },
+  '#/transactions': { view: ImmoApp.Views.Transactions, mode: 'list' },
+  '#/accounting': { view: ImmoApp.Views.Accounting, mode: 'list' },
 
-use OCP\IGroupManager;
-use OCP\IUserSession;
-
-class RoleService {
-
-    public function __construct(
-        private IGroupManager $groupManager,
-        private IUserSession $userSession
-    ) {}
-
-    public function getCurrentRole(): string {
-        $user = $this->userSession->getUser();
-        if ($user === null) {
-            return 'guest';
-        }
-        $uid = $user->getUID();
-
-        if ($this->groupManager->isInGroup($uid, 'immo_admin')) {
-            return 'manager';
-        }
-        if ($this->groupManager->isInGroup($uid, 'immo_tenant')) {
-            return 'tenant';
-        }
-        // Default: Manager, falls du keine Gruppen nutzt
-        return 'manager';
-    }
-
-    public function ensureManager(): void {
-        if ($this->getCurrentRole() !== 'manager') {
-            throw new \RuntimeException('Access denied');
-        }
-    }
-}
+  // Mieter-spezifisch
+  '#/my-tenancies': { view: ImmoApp.Views.MyTenancies, mode: 'list' },
+  '#/my-reports': { view: ImmoApp.Views.MyReports, mode: 'list' }
+};
 ```
 
-**`lib/Service/PropertyService.php`**
+Router generiert aus `location.hash` → Route-Key + Params.
 
-```php
-<?php
+### 3.2 Navigation links (linke Spalte)
 
-namespace OCA\Immo\Service;
+- Für `manager`:
 
-use OCA\Immo\Db\Property;
-use OCA\Immo\Db\PropertyMapper;
-use OCP\IUserSession;
-use OCP\IL10N;
+  - Dashboard → `#/dashboard`
+  - Immobilien → `#/properties`
+  - Mietobjekte → `#/units`
+  - Mieter → `#/tenants`
+  - Mietverhältnisse → `#/tenancies`
+  - Einnahmen/Ausgaben → `#/transactions`
+  - Abrechnungen → `#/accounting`
 
-class PropertyService {
+- Für `tenant`:
 
-    public function __construct(
-        private PropertyMapper $mapper,
-        private IUserSession $userSession,
-        private IL10N $l
-    ) {}
+  - Meine Mietverhältnisse → `#/my-tenancies`
+  - Meine Abrechnungen → `#/my-reports`
 
-    private function getCurrentUid(): string {
-        $user = $this->userSession->getUser();
-        if ($user === null) {
-            throw new \RuntimeException($this->l->t('You must be logged in.'));
-        }
-        return $user->getUID();
-    }
-
-    public function list(): array {
-        $uid = $this->getCurrentUid();
-        return $this->mapper->findAllForOwner($uid);
-    }
-
-    public function get(int $id): Property {
-        $uid = $this->getCurrentUid();
-        $property = $this->mapper->findByIdForOwner($id, $uid);
-        if (!$property) {
-            throw new \RuntimeException($this->l->t('Property not found.'));
-        }
-        return $property;
-    }
-
-    public function create(array $data): Property {
-        $uid = $this->getCurrentUid();
-
-        if (empty($data['name'])) {
-            throw new \InvalidArgumentException($this->l->t('Name is required.'));
-        }
-
-        $now = time();
-        $prop = new Property();
-        $prop->setOwnerUid($uid);
-        $prop->setName($data['name']);
-        $prop->setStreet($data['street'] ?? '');
-        $prop->setZip($data['zip'] ?? '');
-        $prop->setCity($data['city'] ?? '');
-        $prop->setCountry($data['country'] ?? '');
-        $prop->setType($data['type'] ?? '');
-        $prop->setDescription($data['description'] ?? '');
-        $prop->setCreatedAt($now);
-        $prop->setUpdatedAt($now);
-
-        return $this->mapper->insert($prop);
-    }
-
-    public function update(int $id, array $data): Property {
-        $uid = $this->getCurrentUid();
-        $prop = $this->mapper->findByIdForOwner($id, $uid);
-        if (!$prop) {
-            throw new \RuntimeException($this->l->t('Property not found.'));
-        }
-
-        if (!empty($data['name'])) {
-            $prop->setName($data['name']);
-        }
-        $prop->setStreet($data['street'] ?? $prop->getStreet());
-        $prop->setZip($data['zip'] ?? $prop->getZip());
-        $prop->setCity($data['city'] ?? $prop->getCity());
-        $prop->setCountry($data['country'] ?? $prop->getCountry());
-        $prop->setType($data['type'] ?? $prop->getType());
-        $prop->setDescription($data['description'] ?? $prop->getDescription());
-        $prop->setUpdatedAt(time());
-
-        return $this->mapper->update($prop);
-    }
-
-    public function delete(int $id): void {
-        $uid = $this->getCurrentUid();
-        $prop = $this->mapper->findByIdForOwner($id, $uid);
-        if (!$prop) {
-            throw new \RuntimeException($this->l->t('Property not found.'));
-        }
-        $this->mapper->delete($prop);
-    }
-}
-```
-
-**`lib/Service/DashboardService.php` (stark vereinfacht)**
-
-```php
-<?php
-
-namespace OCA\Immo\Service;
-
-use OCP\IUserSession;
-use OCP\IL10N;
-
-class DashboardService {
-
-    public function __construct(
-        private IUserSession $userSession,
-        private IL10N $l
-        // plus Mapper für Properties, Tenancies, Transactions
-    ) {}
-
-    private function getCurrentUid(): string {
-        $user = $this->userSession->getUser();
-        if ($user === null) {
-            throw new \RuntimeException($this->l->t('You must be logged in.'));
-        }
-        return $user->getUID();
-    }
-
-    public function getDashboardData(int $year): array {
-        $uid = $this->getCurrentUid();
-
-        // TODO: echte Queries via Mapper
-        $data = [
-            'counts' => [
-                'properties' => 0,
-                'units' => 0,
-                'activeTenancies' => 0,
-            ],
-            'kpis' => [
-                'totalBaseRentYear' => 0.0,
-                'rentPerSqm' => 0.0,
-            ],
-            'openItems' => [],
-        ];
-
-        return $data;
-    }
-}
-```
-
-**`lib/Service/StatementService.php` (vereinfachte Variante)**
-
-```php
-<?php
-
-namespace OCA\Immo\Service;
-
-use OCA\Immo\Db\PropertyMapper;
-use OCA\Immo\Db\Statement;
-use OCA\Immo\Db\StatementMapper;
-use OCP\Files\IRootFolder;
-use OCP\IUserSession;
-use OCP\IL10N;
-
-class StatementService {
-
-    public function __construct(
-        private IUserSession $userSession,
-        private IL10N $l,
-        private IRootFolder $rootFolder,
-        private PropertyMapper $propertyMapper,
-        private StatementMapper $statementMapper
-        // plus TransactionMapper
-    ) {}
-
-    private function getCurrentUid(): string {
-        $user = $this->userSession->getUser();
-        if ($user === null) {
-            throw new \RuntimeException($this->l->t('You must be logged in.'));
-        }
-        return $user->getUID();
-    }
-
-    public function list(?int $year, ?int $propertyId): array {
-        $uid = $this->getCurrentUid();
-        return $this->statementMapper->findByOwnerAndFilter($uid, $year, $propertyId);
-    }
-
-    public function create(int $year, int $propertyId): Statement {
-        $uid = $this->getCurrentUid();
-
-        $property = $this->propertyMapper->findByIdForOwner($propertyId, $uid);
-        if (!$property) {
-            throw new \RuntimeException($this->l->t('Property not found.'));
-        }
-
-        // TODO: Transactions summieren (income/expense)
-        $totalIncome = 0.0;
-        $totalExpense = 0.0;
-        $net = $totalIncome - $totalExpense;
-
-        $content = "# " . $this->l->t('Annual statement %1$s – %2$s', [$year, $property->getName()]) . "\n\n";
-        $content .= "## " . $this->l->t('Summary') . "\n";
-        $content .= $this->l->t('Total income') . ": " . number_format($totalIncome, 2, ',', '.') . " €\n";
-        $content .= $this->l->t('Total expenses') . ": " . number_format($totalExpense, 2, ',', '.') . " €\n";
-        $content .= $this->l->t('Net result') . ": " . number_format($net, 2, ',', '.') . " €\n";
-
-        $userFolder = $this->rootFolder->getUserFolder($uid);
-        $baseFolder = $userFolder->newFolder('ImmoApp/Abrechnungen', ['create' => true]);
-        $propFolderName = sprintf('%s_%d', preg_replace('/[^a-zA-Z0-9_\-]/', '_', $property->getName()), $property->getId());
-        $propFolder = $baseFolder->newFolder($propFolderName, ['create' => true]);
-
-        $fileName = sprintf('%d_Abrechnung_%d.md', $year, time());
-        $file = $propFolder->newFile($fileName);
-        $file->putContent($content);
-
-        $stmt = new Statement();
-        $stmt->setOwnerUid($uid);
-        $stmt->setYear($year);
-        $stmt->setPropertyId($propertyId);
-        $stmt->setFilePath($file->getPath());
-        $stmt->setTotalIncome($totalIncome);
-        $stmt->setTotalExpense($totalExpense);
-        $stmt->setNetResult($net);
-        $stmt->setCreatedAt(time());
-
-        return $this->statementMapper->insert($stmt);
-    }
-}
-```
+Navigation-Klicks:
+- `a`-Elemente mit `href="#/…"`
+- JS verhindert Fullpage-Reload nicht aktiv (Hash-Navigation), sondern reagiert auf `hashchange`.
 
 ---
 
-### 4. Controller
+## API-Layer (ImmoApp.Api)
 
-**`lib/Controller/PageController.php`**
+### 4.1 Basismethoden
 
-```php
-<?php
+```js
+ImmoApp.Api = (function() {
+  const BASE = OC.linkTo('immoapp', 'api'); // oder einfach '/apps/immoapp/api'
 
-namespace OCA\Immo\Controller;
-
-use OCP\AppFramework\Controller;
-use OCP\AppFramework\Http\TemplateResponse;
-use OCP\IRequest;
-use OCP\IL10N;
-use OCP\IUserSession;
-use OCA\Immo\Service\RoleService;
-
-class PageController extends Controller {
-
-    public function __construct(
-        string $appName,
-        IRequest $request,
-        private IUserSession $userSession,
-        private IL10N $l,
-        private RoleService $roleService
-    ) {
-        parent::__construct($appName, $request);
-    }
-
-    #[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-    public function index(): TemplateResponse {
-        $user = $this->userSession->getUser();
-        if (!$user) {
-            // Nextcloud kümmert sich normalerweise darum, aber zur Sicherheit:
-            throw new \RuntimeException($this->l->t('You must be logged in.'));
+  function buildUrl(path, params) {
+    const url = new URL(BASE + path, window.location.origin);
+    if (params) {
+      Object.keys(params).forEach(key => {
+        if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+          url.searchParams.append(key, params[key]);
         }
-
-        $role = $this->roleService->getCurrentRole();
-
-        return new TemplateResponse(
-            $this->appName,
-            'main',
-            [
-                'userId' => $user->getUID(),
-                'role' => $role,
-            ],
-            'blank'
-        );
+      });
     }
-}
-```
+    return url.toString();
+  }
 
-**`lib/Controller/PropertyController.php`**
-
-```php
-<?php
-
-namespace OCA\Immo\Controller;
-
-use OCP\AppFramework\Controller;
-use OCP\AppFramework\Http\JsonResponse;
-use OCP\IRequest;
-use OCA\Immo\Service\PropertyService;
-use OCA\Immo\Service\RoleService;
-use OCP\IL10N;
-
-class PropertyController extends Controller {
-
-    public function __construct(
-        string $appName,
-        IRequest $request,
-        private PropertyService $propertyService,
-        private RoleService $roleService,
-        private IL10N $l
-    ) {
-        parent::__construct($appName, $request);
+  async function request(method, path, { params, body } = {}) {
+    const url = buildUrl(path, params);
+    const options = {
+      method,
+      headers: {
+        'OCS-APIREQUEST': 'true'
+      },
+      credentials: 'same-origin'
+    };
+    if (body) {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(body);
     }
 
-    #[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-    public function index(): JsonResponse {
-        try {
-            if ($this->roleService->getCurrentRole() !== 'manager') {
-                return new JsonResponse(['error' => $this->l->t('Access denied.')], 403);
-            }
-            $props = $this->propertyService->list();
-            return new JsonResponse($props);
-        } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 500);
-        }
+    const response = await fetch(url, options);
+
+    if (response.status === 204) {
+      return null;
     }
 
-    #[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-    public function show(int $id): JsonResponse {
-        try {
-            if ($this->roleService->getCurrentRole() !== 'manager') {
-                return new JsonResponse(['error' => $this->l->t('Access denied.')], 403);
-            }
-            $prop = $this->propertyService->get($id);
-            return new JsonResponse($prop);
-        } catch (\Throwable $e) {
-            $code = $e instanceof \InvalidArgumentException ? 400 : 404;
-            return new JsonResponse(['error' => $e->getMessage()], $code);
-        }
+    const contentType = response.headers.get('Content-Type') || '';
+    const isJson = contentType.indexOf('application/json') !== -1;
+    const data = isJson ? await response.json() : await response.text();
+
+    if (!response.ok) {
+      const error = new Error((data && data.message) || 'Request failed');
+      error.status = response.status;
+      error.payload = data;
+      throw error;
     }
 
-    #[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-    public function create(): JsonResponse {
-        try {
-            $this->roleService->ensureManager();
-            $data = $this->request->getParams();
-            $created = $this->propertyService->create($data);
-            return new JsonResponse($created, 201);
-        } catch (\InvalidArgumentException $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 400);
-        } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 500);
-        }
-    }
+    return data;
+  }
 
-    #[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-    public function update(int $id): JsonResponse {
-        try {
-            $this->roleService->ensureManager();
-            $data = $this->request->getParams();
-            $updated = $this->propertyService->update($id, $data);
-            return new JsonResponse($updated);
-        } catch (\InvalidArgumentException $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 400);
-        } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 500);
-        }
-    }
+  // öffentliche Methoden
+  async function me() {
+    return request('GET', '/me');
+  }
 
-    #[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-    public function destroy(int $id): JsonResponse {
-        try {
-            $this->roleService->ensureManager();
-            $this->propertyService->delete($id);
-            return new JsonResponse(['status' => 'ok']);
-        } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 500);
-        }
-    }
-}
-```
+  async function getDashboardStats(params) {
+    return request('GET', '/dashboard/stats', { params });
+  }
 
-**`lib/Controller/DashboardController.php`**
+  // Properties
+  async function getProperties() {
+    return request('GET', '/properties');
+  }
+  async function getProperty(id) {
+    return request('GET', `/properties/${encodeURIComponent(id)}`);
+  }
+  async function createProperty(data) {
+    return request('POST', '/properties', { body: data });
+  }
+  async function updateProperty(id, data) {
+    return request('PUT', `/properties/${encodeURIComponent(id)}`, { body: data });
+  }
+  async function deleteProperty(id) {
+    return request('DELETE', `/properties/${encodeURIComponent(id)}`);
+  }
 
-```php
-<?php
+  // Units
+  async function getUnits(params) {
+    return request('GET', '/units', { params });
+  }
+  async function createUnit(data) {
+    return request('POST', '/units', { body: data });
+  }
 
-namespace OCA\Immo\Controller;
+  // Tenants
+  async function getTenants(params) {
+    return request('GET', '/tenants', { params });
+  }
+  async function createTenant(data) {
+    return request('POST', '/tenants', { body: data });
+  }
 
-use OCP\AppFramework\Controller;
-use OCP\AppFramework\Http\JsonResponse;
-use OCP\IRequest;
-use OCA\Immo\Service\DashboardService;
-use OCP\IL10N;
+  // Tenancies
+  async function getTenancies(params) {
+    return request('GET', '/tenancies', { params });
+  }
+  async function createTenancy(data) {
+    return request('POST', '/tenancies', { body: data });
+  }
 
-class DashboardController extends Controller {
+  // Transactions
+  async function getTransactions(params) {
+    return request('GET', '/transactions', { params });
+  }
+  async function createTransaction(data) {
+    return request('POST', '/transactions', { body: data });
+  }
 
-    public function __construct(
-        string $appName,
-        IRequest $request,
-        private DashboardService $dashboardService,
-        private IL10N $l
-    ) {
-        parent::__construct($appName, $request);
-    }
+  // Doc links
+  async function getDocLinks(entityType, entityId) {
+    return request('GET', `/doc-links/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}`);
+  }
+  async function createDocLink(data) {
+    return request('POST', '/doc-links', { body: data });
+  }
 
-    #[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-    public function index(int $year): JsonResponse {
-        try {
-            $data = $this->dashboardService->getDashboardData($year);
-            return new JsonResponse($data);
-        } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 500);
-        }
-    }
-}
-```
+  // Reports
+  async function getReports(params) {
+    return request('GET', '/reports', { params });
+  }
+  async function createReport(data) {
+    return request('POST', '/reports', { body: data });
+  }
 
-**`lib/Controller/StatementController.php`**
-
-```php
-<?php
-
-namespace OCA\Immo\Controller;
-
-use OCP\AppFramework\Controller;
-use OCP\AppFramework\Http\JsonResponse;
-use OCP\IRequest;
-use OCA\Immo\Service\StatementService;
-use OCA\Immo\Service\RoleService;
-use OCP\IL10N;
-
-class StatementController extends Controller {
-
-    public function __construct(
-        string $appName,
-        IRequest $request,
-        private StatementService $statementService,
-        private RoleService $roleService,
-        private IL10N $l
-    ) {
-        parent::__construct($appName, $request);
-    }
-
-    #[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-    public function index(?int $year = null, ?int $propertyId = null): JsonResponse {
-        try {
-            $this->roleService->ensureManager();
-            $statements = $this->statementService->list($year, $propertyId);
-            return new JsonResponse($statements);
-        } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 500);
-        }
-    }
-
-    #[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-    public function create(): JsonResponse {
-        try {
-            $this->roleService->ensureManager();
-            $params = $this->request->getParams();
-            $year = (int)($params['year'] ?? 0);
-            $propertyId = (int)($params['propertyId'] ?? 0);
-
-            if ($year <= 0 || $propertyId <= 0) {
-                return new JsonResponse([
-                    'error' => $this->l->t('Year and property are required.')
-                ], 400);
-            }
-
-            $stmt = $this->statementService->create($year, $propertyId);
-            return new JsonResponse($stmt, 201);
-        } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 500);
-        }
-    }
-}
-```
-
----
-
-### 5. Template & Frontend
-
-**`templates/main.php`**
-
-```php
-<?php
-/** @var array $_ */
-script('immo', 'main'); // js/main.js
-style('immo', 'style'); // optional
-?>
-
-<div id="app">
-  <div id="app-navigation">
-    <ul>
-      <li><a href="#" data-immo-view="dashboard"><?=p($l->t('Dashboard'))?></a></li>
-      <?php if ($_['role'] === 'manager'): ?>
-        <li><a href="#" data-immo-view="properties"><?=p($l->t('Properties'))?></a></li>
-        <li><a href="#" data-immo-view="statements"><?=p($l->t('Statements'))?></a></li>
-        <!-- weitere Menüpunkte -->
-      <?php else: ?>
-        <li><a href="#" data-immo-view="myTenancies"><?=p($l->t('My tenancies'))?></a></li>
-        <li><a href="#" data-immo-view="myStatements"><?=p($l->t('My statements'))?></a></li>
-      <?php endif; ?>
-    </ul>
-  </div>
-
-  <div id="app-content">
-    <div id="immo-header">
-      <h2 id="immo-title"></h2>
-    </div>
-    <div id="immo-content"></div>
-  </div>
-</div>
-
-<script>
-  window.ImmoAppBootstrap = {
-    userId: <?=json_encode($_['userId'])?>,
-    role: <?=json_encode($_['role'])?>
+  return {
+    me,
+    getDashboardStats,
+    getProperties,
+    getProperty,
+    createProperty,
+    updateProperty,
+    deleteProperty,
+    getUnits,
+    createUnit,
+    getTenants,
+    createTenant,
+    getTenancies,
+    createTenancy,
+    getTransactions,
+    createTransaction,
+    getDocLinks,
+    createDocLink,
+    getReports,
+    createReport
   };
-</script>
+})();
 ```
 
 ---
 
-### 6. Frontend JS (Vanilla, Module-Pattern)
+## Beispielcode (JS – Vanilla ES6, Modul-Pattern)
 
-**`js/services/api.js`**
+### 5.1 Util-Modul
 
 ```js
-/* global OC, t */
+ImmoApp.Util = (function() {
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
 
-var ImmoApp = ImmoApp || {};
-ImmoApp.Api = (function () {
-    'use strict';
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return dateStr;
+    return date.toLocaleDateString();
+  }
 
-    function request(method, path, body) {
-        const url = OC.generateUrl('/apps/immo' + path);
-        const options = {
-            method: method,
-            headers: {
-                'Content-Type': 'application/json',
-                'OCS-APIREQUEST': 'true',
-                'requesttoken': OC.requestToken,
-            },
-            credentials: 'same-origin',
-        };
-        if (body !== undefined && body !== null) {
-            options.body = JSON.stringify(body);
-        }
-        return fetch(url, options)
-            .then(function (res) {
-                if (!res.ok) {
-                    return res.json().catch(function () {
-                        throw new Error(t('immo', 'Request failed.'));
-                    }).then(function (data) {
-                        throw new Error(data.error || t('immo', 'Request failed.'));
-                    });
-                }
-                return res.json();
-            });
-    }
+  function formatMoney(amount) {
+    if (amount === null || amount === undefined) return '';
+    return amount.toLocaleString(undefined, {
+      style: 'currency',
+      currency: 'EUR',
+      minimumFractionDigits: 2
+    });
+  }
 
-    function getDashboard(year) {
-        return request('GET', '/api/dashboard?year=' + encodeURIComponent(year));
-    }
+  function html(strings, ...values) {
+    return strings.reduce((acc, s, i) => {
+      let v = '';
+      if (i < values.length) {
+        const value = values[i];
+        v = (value && value.__raw === true) ? String(value.value) : escapeHtml(value);
+      }
+      return acc + s + v;
+    }, '');
+  }
 
-    function getProperties() {
-        return request('GET', '/api/properties');
-    }
+  function raw(value) {
+    return { __raw: true, value };
+  }
 
-    function createProperty(data) {
-        return request('POST', '/api/properties', data);
-    }
-
-    function updateProperty(id, data) {
-        return request('PUT', '/api/properties/' + encodeURIComponent(id), data);
-    }
-
-    function deleteProperty(id) {
-        return request('DELETE', '/api/properties/' + encodeURIComponent(id));
-    }
-
-    function getStatements(filter) {
-        const params = [];
-        if (filter.year) params.push('year=' + encodeURIComponent(filter.year));
-        if (filter.propertyId) params.push('propertyId=' + encodeURIComponent(filter.propertyId));
-        const qs = params.length ? '?' + params.join('&') : '';
-        return request('GET', '/api/statements' + qs);
-    }
-
-    function createStatement(data) {
-        return request('POST', '/api/statements', data);
-    }
-
-    return {
-        request,
-        getDashboard,
-        getProperties,
-        createProperty,
-        updateProperty,
-        deleteProperty,
-        getStatements,
-        createStatement,
-    };
+  return {
+    escapeHtml,
+    formatDate,
+    formatMoney,
+    html,
+    raw
+  };
 })();
 ```
 
-**`js/utils/ui.js`**
+### 5.2 Router-Modul
 
 ```js
-/* global t */
+ImmoApp.Router = (function() {
+  const routes = [];
 
-var ImmoApp = ImmoApp || {};
-ImmoApp.UI = (function () {
-    'use strict';
+  function addRoute(pattern, config) {
+    const tokens = pattern.split('/').filter(Boolean);
+    const paramNames = [];
 
-    const contentEl = function () {
-        return document.getElementById('immo-content');
-    };
-    const titleEl = function () {
-        return document.getElementById('immo-title');
-    };
+    const regexParts = tokens.map(tok => {
+      if (tok.startsWith(':')) {
+        paramNames.push(tok.substring(1));
+        return '([^/]+)';
+      }
+      return tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    });
 
-    function setTitle(title) {
-        titleEl().textContent = title;
+    const regex = new RegExp('^' + regexParts.join('/') + '$');
+    routes.push({ pattern, regex, paramNames, config });
+  }
+
+  function match(hash) {
+    const path = hash.replace(/^#/, '');
+    for (const r of routes) {
+      const m = path.match(r.regex);
+      if (m) {
+        const params = {};
+        r.paramNames.forEach((name, idx) => {
+          params[name] = decodeURIComponent(m[idx + 1]);
+        });
+        return { config: r.config, params };
+      }
+    }
+    return null;
+  }
+
+  function navigate(hash) {
+    if (window.location.hash === hash) {
+      handleHashChange();
+    } else {
+      window.location.hash = hash;
+    }
+  }
+
+  function handleHashChange() {
+    const hash = window.location.hash || '#/dashboard';
+    const matchInfo = match(hash);
+    const contentEl = document.getElementById('immoapp-content');
+
+    if (!contentEl) {
+      console.error('Missing content container #immoapp-content');
+      return;
     }
 
-    function showLoader() {
-        contentEl().innerHTML = '<div class="immo-loader">' +
-            t('immo', 'Loading…') + '</div>';
+    // Destroy previous view if present
+    if (ImmoApp.State.ui.currentView && ImmoApp.State.ui.currentView.destroy) {
+      ImmoApp.State.ui.currentView.destroy();
     }
 
-    function showError(message) {
-        contentEl().innerHTML =
-            '<div class="immo-error">' + window.OC.Util.escapeHTML(message) + '</div>';
+    if (!matchInfo) {
+      contentEl.innerHTML = '<div class="section"><h2>' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'Page not found')) +
+        '</h2></div>';
+      return;
     }
 
-    function renderTable(headers, rows) {
-        const thead = '<thead><tr>' + headers.map(h => '<th>' + h + '</th>').join('') + '</tr></thead>';
-        const tbody = '<tbody>' + rows.map(r =>
-            '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>'
-        ).join('') + '</tbody>';
-        return '<table class="grid">' + thead + tbody + '</table>';
+    const { config, params } = matchInfo;
+    const view = config.view;
+    const mode = config.mode || 'list';
+
+    ImmoApp.State.ui.currentRoute = hash;
+    ImmoApp.State.ui.currentView = view;
+
+    // Berechtigungsebene im Frontend grob prüfen
+    const role = ImmoApp.State.currentUser.role;
+    const allowedForTenant = ['#/my-tenancies', '#/my-reports'];
+    if (role === 'tenant' && !allowedForTenant.some(prefix => hash.startsWith(prefix))) {
+      contentEl.innerHTML = '<div class="section"><h2>' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'You are not allowed to perform this action.')) +
+        '</h2></div>';
+      return;
     }
 
-    return {
-        setTitle,
-        showLoader,
-        showError,
-        renderTable,
-    };
+    view.init(contentEl, { mode, params }, {});
+  }
+
+  function init() {
+    window.addEventListener('hashchange', handleHashChange);
+    if (!window.location.hash) {
+      if (ImmoApp.State.currentUser.role === 'tenant') {
+        navigate('#/my-tenancies');
+      } else {
+        navigate('#/dashboard');
+      }
+    } else {
+      handleHashChange();
+    }
+  }
+
+  return {
+    init,
+    navigate,
+    addRoute
+  };
 })();
 ```
 
-**`js/views/dashboard.js`**
+Initiale Router-Konfiguration (in `ImmoApp.App.init()`):
 
 ```js
-/* global t, ImmoApp */
+// Konfiguration
+ImmoApp.Router.addRoute('/dashboard', { view: ImmoApp.Views.Dashboard });
+ImmoApp.Router.addRoute('/properties', { view: ImmoApp.Views.Properties, mode: 'list' });
+ImmoApp.Router.addRoute('/properties/new', { view: ImmoApp.Views.Properties, mode: 'new' });
+ImmoApp.Router.addRoute('/properties/:id', { view: ImmoApp.Views.Properties, mode: 'detail' });
+ImmoApp.Router.addRoute('/properties/:id/edit', { view: ImmoApp.Views.Properties, mode: 'edit' });
 
-var ImmoApp = ImmoApp || {};
+ImmoApp.Router.addRoute('/units', { view: ImmoApp.Views.Units, mode: 'list' });
+ImmoApp.Router.addRoute('/tenants', { view: ImmoApp.Views.Tenants, mode: 'list' });
+ImmoApp.Router.addRoute('/tenancies', { view: ImmoApp.Views.Tenancies, mode: 'list' });
+ImmoApp.Router.addRoute('/transactions', { view: ImmoApp.Views.Transactions, mode: 'list' });
+ImmoApp.Router.addRoute('/accounting', { view: ImmoApp.Views.Accounting, mode: 'list' });
+
+ImmoApp.Router.addRoute('/my-tenancies', { view: ImmoApp.Views.MyTenancies, mode: 'list' });
+ImmoApp.Router.addRoute('/my-reports', { view: ImmoApp.Views.MyReports, mode: 'list' });
+```
+
+### 5.3 App-Init-Modul
+
+```js
+ImmoApp.App = (function() {
+  async function init() {
+    const contentEl = document.getElementById('immoapp-content');
+    if (!contentEl) {
+      return;
+    }
+
+    try {
+      const me = await ImmoApp.Api.me();
+      ImmoApp.State.currentUser.userId = me.userId;
+      ImmoApp.State.currentUser.role = me.role;
+      ImmoApp.State.currentUser.config = me.config || ImmoApp.State.currentUser.config;
+      ImmoApp.State.ui.filters.year = me.config?.defaultYear || (new Date()).getFullYear();
+    } catch (e) {
+      contentEl.innerHTML = '<div class="section"><h2>' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'Error loading user information')) +
+        '</h2></div>';
+      return;
+    }
+
+    // Navigation in der Sidebar für Rolle anpassen
+    setupSidebarForRole(ImmoApp.State.currentUser.role);
+
+    // Router konfigurieren (siehe oben)
+    // ... Router.addRoute(...)
+    ImmoApp.Router.init();
+  }
+
+  function setupSidebarForRole(role) {
+    const navManager = document.querySelector('[data-immoapp-nav="manager"]');
+    const navTenant = document.querySelector('[data-immoapp-nav="tenant"]');
+    if (role === 'tenant') {
+      if (navManager) navManager.style.display = 'none';
+      if (navTenant) navTenant.style.display = '';
+    } else {
+      if (navManager) navManager.style.display = '';
+      if (navTenant) navTenant.style.display = 'none';
+    }
+  }
+
+  return {
+    init
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', ImmoApp.App.init);
+```
+
+### 5.4 Beispiel: Dashboard-View
+
+```js
 ImmoApp.Views = ImmoApp.Views || {};
 
-ImmoApp.Views.Dashboard = (function () {
-    'use strict';
+ImmoApp.Views.Dashboard = (function() {
+  let root;
 
-    function render(year) {
-        ImmoApp.UI.setTitle(t('immo', 'Dashboard') + ' ' + year);
-        ImmoApp.UI.showLoader();
+  async function init(rootEl, route, query) {
+    root = rootEl;
+    renderSkeleton();
+    await loadData();
+  }
 
-        ImmoApp.Api.getDashboard(year)
-            .then(function (data) {
-                const c = document.getElementById('immo-content');
-                const counts = data.counts || {};
-                const kpis = data.kpis || {};
-                const openItems = data.openItems || [];
+  function destroy() {
+    if (root) {
+      root.innerHTML = '';
+    }
+  }
 
-                const html = []
-                html.push('<div class="immo-kpis">');
-                html.push('<div class="immo-kpi"><span class="label">' + t('immo', 'Properties') + '</span><span class="value">' + (counts.properties || 0) + '</span></div>');
-                html.push('<div class="immo-kpi"><span class="label">' + t('immo', 'Units') + '</span><span class="value">' + (counts.units || 0) + '</span></div>');
-                html.push('<div class="immo-kpi"><span class="label">' + t('immo', 'Active tenancies') + '</span><span class="value">' + (counts.activeTenancies || 0) + '</span></div>');
-                html.push('<div class="immo-kpi"><span class="label">' + t('immo', 'Total base rent (year)') + '</span><span class="value">' + (kpis.totalBaseRentYear || 0) + ' €</span></div>');
-                html.push('</div>');
+  function renderSkeleton() {
+    const year = ImmoApp.State.ui.filters.year || (new Date()).getFullYear();
+    root.innerHTML = ImmoApp.Util.html`
+      <div class="section">
+        <h2>${t('immoapp', 'Dashboard')}</h2>
+        <div class="filters">
+          <label>
+            ${t('immoapp', 'Year')}
+            <select id="immoapp-dashboard-year">
+              ${ImmoApp.Util.raw(renderYearOptions(year))}
+            </select>
+          </label>
+        </div>
+        <div id="immoapp-dashboard-content">
+          <div class="icon-loading"></div>
+        </div>
+      </div>
+    `;
 
-                html.push('<h3>' + t('immo', 'Open items') + '</h3>');
-                if (!openItems.length) {
-                    html.push('<p>' + t('immo', 'No open items.') + '</p>');
-                } else {
-                    const rows = openItems.map(function (item) {
-                        return [ item.type, item.label, item.dueDate ];
-                    });
-                    html.push(ImmoApp.UI.renderTable(
-                        [ t('immo', 'Type'), t('immo', 'Description'), t('immo', 'Date') ],
-                        rows
-                    ));
-                }
+    const yearSelect = document.getElementById('immoapp-dashboard-year');
+    yearSelect.addEventListener('change', onYearChange);
+  }
 
-                c.innerHTML = html.join('');
-            })
-            .catch(function (err) {
-                ImmoApp.UI.showError(err.message);
-            });
+  function renderYearOptions(selectedYear) {
+    const currentYear = (new Date()).getFullYear();
+    const years = [];
+    for (let y = currentYear + 1; y >= currentYear - 5; y--) {
+      const selected = y === Number(selectedYear) ? ' selected' : '';
+      years.push(`<option value="${y}"${selected}>${y}</option>`);
+    }
+    return years.join('');
+  }
+
+  async function loadData() {
+    const year = document.getElementById('immoapp-dashboard-year').value;
+    ImmoApp.State.ui.filters.year = Number(year);
+
+    const container = document.getElementById('immoapp-dashboard-content');
+    container.innerHTML = '<div class="icon-loading"></div>';
+
+    try {
+      const stats = await ImmoApp.Api.getDashboardStats({ year });
+      container.innerHTML = ImmoApp.Util.html`
+        <div class="dashboard-grid">
+          <div class="dashboard-card">
+            <h3>${t('immoapp', 'Properties')}</h3>
+            <div class="dashboard-value">${stats.counts.properties}</div>
+          </div>
+          <div class="dashboard-card">
+            <h3>${t('immoapp', 'Units')}</h3>
+            <div class="dashboard-value">${stats.counts.units}</div>
+          </div>
+          <div class="dashboard-card">
+            <h3>${t('immoapp', 'Active tenancies')}</h3>
+            <div class="dashboard-value">${stats.counts.activeTenancies}</div>
+          </div>
+          <div class="dashboard-card">
+            <h3>${t('immoapp', 'Annual cold rent')}</h3>
+            <div class="dashboard-value">
+              ${ImmoApp.Util.formatMoney(stats.rent.annualColdRent)}
+            </div>
+          </div>
+        </div>
+        <div class="section">
+          <h3>${t('immoapp', 'Cashflow')}</h3>
+          <p>${t('immoapp', 'Income')}: ${ImmoApp.Util.formatMoney(stats.cashflow.income)}</p>
+          <p>${t('immoapp', 'Expenses')}: ${ImmoApp.Util.formatMoney(stats.cashflow.expense)}</p>
+          <p>${t('immoapp', 'Net')}: ${ImmoApp.Util.formatMoney(stats.cashflow.net)}</p>
+        </div>
+        <div class="section">
+          <h3>${t('immoapp', 'Open items')}</h3>
+          ${ImmoApp.Util.raw(renderOpenItems(stats.openItems))}
+        </div>
+      `;
+    } catch (e) {
+      container.innerHTML = '<div class="error">' +
+        ImmoApp.Util.escapeHtml(
+          t('immoapp', 'Failed to load dashboard data.')
+        ) +
+        '</div>';
+    }
+  }
+
+  function renderOpenItems(openItems) {
+    const hasItems =
+      (openItems.tenanciesStartingSoon && openItems.tenanciesStartingSoon.length > 0) ||
+      (openItems.tenanciesEndingSoon && openItems.tenanciesEndingSoon.length > 0) ||
+      (openItems.transactionsWithoutCategory && openItems.transactionsWithoutCategory.length > 0) ||
+      (openItems.transactionsWithoutTenancy && openItems.transactionsWithoutTenancy.length > 0);
+
+    if (!hasItems) {
+      return `<p>${ImmoApp.Util.escapeHtml(t('immoapp', 'No open items'))}</p>`;
     }
 
-    return {
-        render,
-    };
+    return `
+      <ul class="open-items-list">
+        ${openItems.tenanciesStartingSoon.map(tn =>
+          `<li>${ImmoApp.Util.escapeHtml(t('immoapp', 'Tenancy starts soon'))}: ${ImmoApp.Util.escapeHtml(tn.label || '')}</li>`
+        ).join('')}
+        ${openItems.tenanciesEndingSoon.map(tn =>
+          `<li>${ImmoApp.Util.escapeHtml(t('immoapp', 'Tenancy ends soon'))}: ${ImmoApp.Util.escapeHtml(tn.label || '')}</li>`
+        ).join('')}
+        ${openItems.transactionsWithoutCategory.map(tr =>
+          `<li>${ImmoApp.Util.escapeHtml(t('immoapp', 'Transaction without category'))}: ${ImmoApp.Util.escapeHtml(tr.description || '')}</li>`
+        ).join('')}
+        ${openItems.transactionsWithoutTenancy.map(tr =>
+          `<li>${ImmoApp.Util.escapeHtml(t('immoapp', 'Transaction not assigned to tenancy'))}: ${ImmoApp.Util.escapeHtml(tr.description || '')}</li>`
+        ).join('')}
+      </ul>
+    `;
+  }
+
+  function onYearChange() {
+    loadData();
+  }
+
+  return {
+    init,
+    destroy
+  };
 })();
 ```
 
-**`js/views/properties.js`**
+### 5.5 Beispiel: Properties-View (Liste + Form grob)
 
 ```js
-/* global t, ImmoApp, OC */
+ImmoApp.Views.Properties = (function() {
+  let root;
+  let mode;
+  let currentId;
 
-var ImmoApp = ImmoApp || {};
-ImmoApp.Views = ImmoApp.Views || {};
+  async function init(rootEl, route) {
+    root = rootEl;
+    mode = route.mode || 'list';
+    currentId = route.params.id ? Number(route.params.id) : null;
 
-ImmoApp.Views.Properties = (function () {
-    'use strict';
-
-    function renderList() {
-        ImmoApp.UI.setTitle(t('immo', 'Properties'));
-        ImmoApp.UI.showLoader();
-
-        ImmoApp.Api.getProperties()
-            .then(function (data) {
-                const c = document.getElementById('immo-content');
-                const html = [];
-
-                html.push('<div class="immo-toolbar">');
-                html.push('<button id="immo-add-property" class="primary">' +
-                    t('immo', 'New property') + '</button>');
-                html.push('</div>');
-
-                if (!data.length) {
-                    html.push('<p>' + t('immo', 'No properties yet. Create your first property.') + '</p>');
-                } else {
-                    const rows = data.map(function (p) {
-                        const link = '<a href="#" data-immo-property-id="' + p.id + '">' +
-                            OC.Util.escapeHTML(p.name) + '</a>';
-                        return [
-                            link,
-                            OC.Util.escapeHTML(p.city || ''),
-                            OC.Util.escapeHTML(p.type || ''),
-                        ];
-                    });
-                    html.push(ImmoApp.UI.renderTable(
-                        [ t('immo', 'Name'), t('immo', 'City'), t('immo', 'Type') ],
-                        rows
-                    ));
-                }
-
-                c.innerHTML = html.join('');
-                bindListEvents();
-            })
-            .catch(function (err) {
-                ImmoApp.UI.showError(err.message);
-            });
+    if (mode === 'list') {
+      await renderList();
+    } else if (mode === 'new') {
+      renderForm();
+    } else if (mode === 'detail') {
+      await renderDetail();
+    } else if (mode === 'edit') {
+      await renderEditForm();
     }
+  }
 
-    function bindListEvents() {
-        const addBtn = document.getElementById('immo-add-property');
-        if (addBtn) {
-            addBtn.addEventListener('click', function (e) {
-                e.preventDefault();
-                renderCreateForm();
-            });
+  function destroy() {
+    if (root) {
+      root.innerHTML = '';
+    }
+  }
+
+  async function renderList() {
+    root.innerHTML = '<div class="section"><h2>' +
+      ImmoApp.Util.escapeHtml(t('immoapp', 'Properties')) +
+      '</h2><div class="icon-loading"></div></div>';
+
+    try {
+      const properties = await ImmoApp.Api.getProperties();
+      const rows = properties.map(p => ImmoApp.Util.html`
+        <tr data-id="${p.id}">
+          <td><a href="#/properties/${p.id}">${p.name}</a></td>
+          <td>${p.city}</td>
+          <td>${p.stats ? p.stats.unitCount : ''}</td>
+          <td>${p.stats ? ImmoApp.Util.formatMoney(p.stats.annualIncome) : ''}</td>
+        </tr>
+      `).join('');
+
+      root.innerHTML = ImmoApp.Util.html`
+        <div class="section">
+          <div class="header">
+            <h2>${t('immoapp', 'Properties')}</h2>
+            <button id="immoapp-property-new" class="primary">
+              ${t('immoapp', 'New property')}
+            </button>
+          </div>
+          ${
+            properties.length === 0
+              ? ImmoApp.Util.html`
+                <p>${t('immoapp', 'No properties yet.')}</p>
+                <button id="immoapp-property-new-empty" class="primary">
+                  ${t('immoapp', 'Create first property')}
+                </button>
+              `
+              : ImmoApp.Util.html`
+                <table class="grid">
+                  <thead>
+                    <tr>
+                      <th>${t('immoapp', 'Name')}</th>
+                      <th>${t('immoapp', 'City')}</th>
+                      <th>${t('immoapp', 'Units')}</th>
+                      <th>${t('immoapp', 'Annual income')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>${ImmoApp.Util.raw(rows)}</tbody>
+                </table>
+              `
+          }
+        </div>
+      `;
+
+      const newBtn = document.getElementById('immoapp-property-new') ||
+        document.getElementById('immoapp-property-new-empty');
+
+      if (newBtn) {
+        newBtn.addEventListener('click', () => {
+          ImmoApp.Router.navigate('#/properties/new');
+        });
+      }
+    } catch (e) {
+      root.innerHTML = '<div class="section"><h2>' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'Properties')) +
+        '</h2><div class="error">' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'Failed to load properties')) +
+        '</div></div>';
+    }
+  }
+
+  function renderForm(property) {
+    const isEdit = !!property;
+    const title = isEdit
+      ? t('immoapp', 'Edit property')
+      : t('immoapp', 'New property');
+
+    root.innerHTML = ImmoApp.Util.html`
+      <div class="section">
+        <h2>${title}</h2>
+        <form id="immoapp-property-form">
+          <label>
+            ${t('immoapp', 'Name')} *
+            <input type="text" name="name" value="${property ? property.name : ''}" required />
+          </label>
+          <label>
+            ${t('immoapp', 'Street')}
+            <input type="text" name="street" value="${property ? property.street : ''}" />
+          </label>
+          <label>
+            ${t('immoapp', 'ZIP')}
+            <input type="text" name="zip" value="${property ? property.zip : ''}" />
+          </label>
+          <label>
+            ${t('immoapp', 'City')}
+            <input type="text" name="city" value="${property ? property.city : ''}" />
+          </label>
+          <label>
+            ${t('immoapp', 'Country')}
+            <input type="text" name="country" value="${property ? property.country : ''}" />
+          </label>
+          <label>
+            ${t('immoapp', 'Type')}
+            <input type="text" name="type" value="${property ? property.type : ''}" />
+          </label>
+          <label>
+            ${t('immoapp', 'Notes')}
+            <textarea name="notes">${property ? (property.notes || '') : ''}</textarea>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="primary">
+              ${t('immoapp', 'Save')}
+            </button>
+            <button type="button" id="immoapp-property-cancel">
+              ${t('immoapp', 'Cancel')}
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    const form = document.getElementById('immoapp-property-form');
+    const cancelBtn = document.getElementById('immoapp-property-cancel');
+
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const formData = new FormData(form);
+      const data = {
+        name: formData.get('name'),
+        street: formData.get('street'),
+        zip: formData.get('zip'),
+        city: formData.get('city'),
+        country: formData.get('country'),
+        type: formData.get('type'),
+        notes: formData.get('notes')
+      };
+
+      try {
+        if (isEdit) {
+          await ImmoApp.Api.updateProperty(property.id, data);
+        } else {
+          await ImmoApp.Api.createProperty(data);
         }
+        ImmoApp.Router.navigate('#/properties');
+      } catch (err) {
+        alert(t('immoapp', 'Failed to save property.'));
+      }
+    });
 
-        document.querySelectorAll('[data-immo-property-id]').forEach(function (el) {
-            el.addEventListener('click', function (e) {
-                e.preventDefault();
-                const id = parseInt(this.getAttribute('data-immo-property-id'), 10);
-                renderEditForm(id);
-            });
+    cancelBtn.addEventListener('click', function() {
+      if (isEdit && property && property.id) {
+        ImmoApp.Router.navigate(`#/properties/${property.id}`);
+      } else {
+        ImmoApp.Router.navigate('#/properties');
+      }
+    });
+  }
+
+  async function renderDetail() {
+    if (!currentId) {
+      ImmoApp.Router.navigate('#/properties');
+      return;
+    }
+
+    root.innerHTML = '<div class="section"><h2>' +
+      ImmoApp.Util.escapeHtml(t('immoapp', 'Property')) +
+      '</h2><div class="icon-loading"></div></div>';
+
+    try {
+      const property = await ImmoApp.Api.getProperty(currentId);
+
+      root.innerHTML = ImmoApp.Util.html`
+        <div class="section">
+          <div class="header">
+            <h2>${property.name}</h2>
+            <div>
+              <button id="immoapp-property-edit">
+                ${t('immoapp', 'Edit')}
+              </button>
+              <button id="immoapp-property-delete">
+                ${t('immoapp', 'Delete')}
+              </button>
+            </div>
+          </div>
+          <p>${property.street}, ${property.zip} ${property.city}, ${property.country}</p>
+          <p>${ImmoApp.Util.escapeHtml(property.type || '')}</p>
+          <p>${ImmoApp.Util.escapeHtml(property.notes || '')}</p>
+
+          <h3>${t('immoapp', 'Units')}</h3>
+          <div id="immoapp-property-units">
+            <div class="icon-loading"></div>
+          </div>
+
+          <h3>${t('immoapp', 'Reports')}</h3>
+          <div id="immoapp-property-reports">
+            <div class="icon-loading"></div>
+          </div>
+
+          <h3>${t('immoapp', 'Documents')}</h3>
+          <div id="immoapp-property-docs">
+            <div class="icon-loading"></div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('immoapp-property-edit')
+        .addEventListener('click', () => ImmoApp.Router.navigate(`#/properties/${property.id}/edit`));
+      document.getElementById('immoapp-property-delete')
+        .addEventListener('click', async () => {
+          if (!confirm(t('immoapp', 'Do you really want to delete this property?'))) {
+            return;
+          }
+          try {
+            await ImmoApp.Api.deleteProperty(property.id);
+            ImmoApp.Router.navigate('#/properties');
+          } catch (e) {
+            alert(t('immoapp', 'Cannot delete property.'));
+          }
         });
+
+      // Unterbereiche laden
+      loadUnitsForProperty(property.id);
+      loadReportsForProperty(property.id);
+      loadDocsForProperty(property.id);
+
+    } catch (e) {
+      root.innerHTML = '<div class="section"><h2>' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'Property')) +
+        '</h2><div class="error">' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'Property not found or access denied.')) +
+        '</div></div>';
     }
+  }
 
-    function renderCreateForm() {
-        ImmoApp.UI.setTitle(t('immo', 'New property'));
-        const c = document.getElementById('immo-content');
-        c.innerHTML = propertyFormHtml({});
-        bindFormEvents();
+  async function renderEditForm() {
+    if (!currentId) {
+      ImmoApp.Router.navigate('#/properties');
+      return;
     }
-
-    function renderEditForm(id) {
-        ImmoApp.UI.setTitle(t('immo', 'Edit property'));
-        ImmoApp.UI.showLoader();
-
-        ImmoApp.Api.request('GET', '/api/properties/' + id)
-            .then(function (prop) {
-                const c = document.getElementById('immo-content');
-                c.innerHTML = propertyFormHtml(prop);
-                bindFormEvents(prop.id);
-            })
-            .catch(function (err) {
-                ImmoApp.UI.showError(err.message);
-            });
+    try {
+      const property = await ImmoApp.Api.getProperty(currentId);
+      renderForm(property);
+    } catch (e) {
+      ImmoApp.Router.navigate('#/properties');
     }
+  }
 
-    function propertyFormHtml(prop) {
-        return '' +
-        '<form id="immo-property-form">' +
-            '<div class="section">' +
-                '<label>' + t('immo', 'Name') + ' *</label>' +
-                '<input type="text" name="name" value="' + (prop.name ? OC.Util.escapeHTML(prop.name) : '') + '" required />' +
-            '</div>' +
-            '<div class="section">' +
-                '<label>' + t('immo', 'Street') + '</label>' +
-                '<input type="text" name="street" value="' + (prop.street ? OC.Util.escapeHTML(prop.street) : '') + '" />' +
-            '</div>' +
-            '<div class="section">' +
-                '<label>' + t('immo', 'ZIP') + '</label>' +
-                '<input type="text" name="zip" value="' + (prop.zip ? OC.Util.escapeHTML(prop.zip) : '') + '" />' +
-            '</div>' +
-            '<div class="section">' +
-                '<label>' + t('immo', 'City') + '</label>' +
-                '<input type="text" name="city" value="' + (prop.city ? OC.Util.escapeHTML(prop.city) : '') + '" />' +
-            '</div>' +
-            '<div class="section">' +
-                '<label>' + t('immo', 'Country') + '</label>' +
-                '<input type="text" name="country" value="' + (prop.country ? OC.Util.escapeHTML(prop.country) : '') + '" />' +
-            '</div>' +
-            '<div class="section">' +
-                '<label>' + t('immo', 'Type') + '</label>' +
-                '<input type="text" name="type" value="' + (prop.type ? OC.Util.escapeHTML(prop.type) : '') + '" />' +
-            '</div>' +
-            '<div class="section">' +
-                '<label>' + t('immo', 'Description') + '</label>' +
-                '<textarea name="description">' + (prop.description ? OC.Util.escapeHTML(prop.description) : '') + '</textarea>' +
-            '</div>' +
-            '<div class="section buttons">' +
-                '<button type="submit" class="primary">' + t('immo', 'Save') + '</button>' +
-                '<button type="button" id="immo-cancel">' + t('immo', 'Cancel') + '</button>' +
-            '</div>' +
-        '</form>';
+  async function loadUnitsForProperty(propertyId) {
+    const container = document.getElementById('immoapp-property-units');
+    try {
+      const units = await ImmoApp.Api.getUnits({ propertyId });
+      if (units.length === 0) {
+        container.innerHTML = ImmoApp.Util.html`
+          <p>${t('immoapp', 'No units for this property yet.')}</p>
+        `;
+        return;
+      }
+      const rows = units.map(u => ImmoApp.Util.html`
+        <tr>
+          <td>${u.label}</td>
+          <td>${u.unitNumber || ''}</td>
+          <td>${u.livingArea || ''}</td>
+        </tr>
+      `).join('');
+      container.innerHTML = ImmoApp.Util.html`
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>${t('immoapp', 'Label')}</th>
+              <th>${t('immoapp', 'Unit number')}</th>
+              <th>${t('immoapp', 'Living area')}</th>
+            </tr>
+          </thead>
+          <tbody>${ImmoApp.Util.raw(rows)}</tbody>
+        </table>
+      `;
+    } catch (e) {
+      container.innerHTML = '<div class="error">' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'Failed to load units')) +
+        '</div>';
     }
+  }
 
-    function bindFormEvents(id) {
-        const form = document.getElementById('immo-property-form');
-        const cancelBtn = document.getElementById('immo-cancel');
-
-        if (cancelBtn) {
-            cancelBtn.addEventListener('click', function (e) {
-                e.preventDefault();
-                renderList();
-            });
-        }
-
-        form.addEventListener('submit', function (e) {
-            e.preventDefault();
-            const data = {
-                name: form.elements.name.value.trim(),
-                street: form.elements.street.value.trim(),
-                zip: form.elements.zip.value.trim(),
-                city: form.elements.city.value.trim(),
-                country: form.elements.country.value.trim(),
-                type: form.elements.type.value.trim(),
-                description: form.elements.description.value.trim(),
-            };
-
-            const action = id ? ImmoApp.Api.updateProperty(id, data) : ImmoApp.Api.createProperty(data);
-            action.then(function () {
-                renderList();
-            }).catch(function (err) {
-                ImmoApp.UI.showError(err.message);
-            });
-        });
+  async function loadReportsForProperty(propertyId) {
+    const container = document.getElementById('immoapp-property-reports');
+    try {
+      const reports = await ImmoApp.Api.getReports({ propertyId });
+      if (reports.length === 0) {
+        container.innerHTML = ImmoApp.Util.html`
+          <p>${t('immoapp', 'No reports yet.')}</p>
+        `;
+        return;
+      }
+      const rows = reports.map(r => ImmoApp.Util.html`
+        <tr>
+          <td>${r.year}</td>
+          <td>${ImmoApp.Util.formatDate(new Date(r.createdAt * 1000).toISOString())}</td>
+          <td><a href="${ImmoApp.Util.escapeHtml(r.path)}" target="_blank">
+            ${t('immoapp', 'Download')}
+          </a></td>
+        </tr>
+      `).join('');
+      container.innerHTML = ImmoApp.Util.html`
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>${t('immoapp', 'Year')}</th>
+              <th>${t('immoapp', 'Created')}</th>
+              <th>${t('immoapp', 'File')}</th>
+            </tr>
+          </thead>
+          <tbody>${ImmoApp.Util.raw(rows)}</tbody>
+        </table>
+      `;
+    } catch (e) {
+      container.innerHTML = '<div class="error">' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'Failed to load reports')) +
+        '</div>';
     }
+  }
 
-    return {
-        renderList,
-        renderCreateForm,
-        renderEditForm,
-    };
+  async function loadDocsForProperty(propertyId) {
+    const container = document.getElementById('immoapp-property-docs');
+    try {
+      const docs = await ImmoApp.Api.getDocLinks('property', propertyId);
+      if (docs.length === 0) {
+        container.innerHTML = ImmoApp.Util.html`
+          <p>${t('immoapp', 'No documents linked yet.')}</p>
+        `;
+        return;
+      }
+      const items = docs.map(d => ImmoApp.Util.html`
+        <li>
+          <a href="${ImmoApp.Util.escapeHtml(d.path)}" target="_blank">
+            ${d.name || d.path}
+          </a>
+        </li>
+      `).join('');
+      container.innerHTML = ImmoApp.Util.html`
+        <ul>${ImmoApp.Util.raw(items)}</ul>
+      `;
+    } catch (e) {
+      container.innerHTML = '<div class="error">' +
+        ImmoApp.Util.escapeHtml(t('immoapp', 'Failed to load documents')) +
+        '</div>';
+    }
+  }
+
+  return {
+    init,
+    destroy
+  };
 })();
-```
-
-**`js/views/statements.js`**
-
-```js
-/* global t, ImmoApp, OC */
-
-var ImmoApp = ImmoApp || {};
-ImmoApp.Views = ImmoApp.Views || {};
-
-ImmoApp.Views.Statements = (function () {
-    'use strict';
-
-    function renderList() {
-        ImmoApp.UI.setTitle(t('immo', 'Statements'));
-        ImmoApp.UI.showLoader();
-
-        const year = (new Date()).getFullYear();
-
-        ImmoApp.Api.getStatements({ year: year })
-            .then(function (data) {
-                const c = document.getElementById('immo-content');
-                const html = [];
-
-                html.push('<div class="immo-toolbar">');
-                html.push('<button id="immo-create-statement" class="primary">' +
-                    t('immo', 'Create statement') + '</button>');
-                html.push('</div>');
-
-                if (!data.length) {
-                    html.push('<p>' + t('immo', 'No statements for this year.') + '</p>');
-                } else {
-                    const rows = data.map(function (s) {
-                        const path = OC.Util.escapeHTML(s.filePath);
-                        const link = '<a href="' + OC.generateUrl('/apps/files?dir=' + encodeURIComponent(path)) + '" target="_blank">' +
-                            t('immo', 'Download') + '</a>';
-                        return [
-                            s.year,
-                            s.propertyId,
-                            link,
-                            (s.netResult || 0) + ' €',
-                        ];
-                    });
-                    html.push(ImmoApp.UI.renderTable(
-                        [ t('immo', 'Year'), t('immo', 'Property'), t('immo', 'File'), t('immo', 'Net result') ],
-                        rows
-                    ));
-                }
-
-                c.innerHTML = html.join('');
-                bindListEvents();
-            })
-            .catch(function (err) {
-                ImmoApp.UI.showError(err.message);
-            });
-    }
-
-    function bindListEvents() {
-        const btn = document.getElementById('immo-create-statement');
-        if (!btn) return;
-        btn.addEventListener('click', function (e) {
-            e.preventDefault();
-            renderCreateForm();
-        });
-    }
-
-    function renderCreateForm() {
-        ImmoApp.UI.setTitle(t('immo', 'Create statement'));
-        const c = document.getElementById('immo-content');
-
-        const year = (new Date()).getFullYear();
-
-        const html = [];
-        html.push('<form id="immo-statement-form">');
-        html.push('<div class="section">');
-        html.push('<label>' + t('immo', 'Year') + '</label>');
-        html.push('<input type="number" name="year" value="' + year + '" min="1900" max="2100" />');
-        html.push('</div>');
-        html.push('<div class="section">');
-        html.push('<label>' + t('immo', 'Property ID') + '</label>');
-        html.push('<input type="number" name="propertyId" required />');
-        html.push('</div>');
-        html.push('<div class="section buttons">');
-        html.push('<button type="submit" class="primary">' + t('immo', 'Generate') + '</button>');
-        html.push('<button type="button" id="immo-cancel">' + t('immo', 'Cancel') + '</button>');
-        html.push('</div>');
-        html.push('</form>');
-
-        c.innerHTML = html.join('');
-
-        const form = document.getElementById('immo-statement-form');
-        const cancelBtn = document.getElementById('immo-cancel');
-
-        cancelBtn.addEventListener('click', function (e) {
-            e.preventDefault();
-            renderList();
-        });
-
-        form.addEventListener('submit', function (e) {
-            e.preventDefault();
-            const yearVal = parseInt(form.elements.year.value, 10);
-            const propId = parseInt(form.elements.propertyId.value, 10);
-            ImmoApp.Api.createStatement({ year: yearVal, propertyId: propId })
-                .then(function () {
-                    renderList();
-                })
-                .catch(function (err) {
-                    ImmoApp.UI.showError(err.message);
-                });
-        });
-    }
-
-    return {
-        renderList,
-        renderCreateForm,
-    };
-})();
-```
-
-**`js/main.js`**
-
-```js
-/* global ImmoAppBootstrap, t */
-
-var ImmoApp = ImmoApp || {};
-ImmoApp.Main = (function () {
-    'use strict';
-
-    function init() {
-        bindNavigation();
-        // default view
-        switchView('dashboard');
-    }
-
-    function bindNavigation() {
-        var links = document.querySelectorAll('[data-immo-view]');
-        Array.prototype.forEach.call(links, function (link) {
-            link.addEventListener('click', function (e) {
-                e.preventDefault();
-                var view = this.getAttribute('data-immo-view');
-                switchView(view);
-            });
-        });
-    }
-
-    function switchView(view) {
-        if (view === 'dashboard') {
-            var year = (new Date()).getFullYear();
-            ImmoApp.Views.Dashboard.render(year);
-        } else if (view === 'properties') {
-            ImmoApp.Views.Properties.renderList();
-        } else if (view === 'statements') {
-            ImmoApp.Views.Statements.renderList();
-        } else if (view === 'myTenancies') {
-            // TODO: implement tenant view
-            ImmoApp.UI.setTitle(t('immo', 'My tenancies'));
-            ImmoApp.UI.showError(t('immo', 'Not implemented yet.'));
-        } else if (view === 'myStatements') {
-            // TODO: implement tenant view
-            ImmoApp.UI.setTitle(t('immo', 'My statements'));
-            ImmoApp.UI.showError(t('immo', 'Not implemented yet.'));
-        }
-        // optional: update URL hash
-        window.location.hash = '#' + view;
-    }
-
-    return {
-        init: init,
-        switchView: switchView,
-    };
-})();
-
-document.addEventListener('DOMContentLoaded', function () {
-    ImmoApp.Main.init();
-});
 ```
 
 ---
 
-Damit hast du:
-
-- Klar getrennte Komponenten (Controller, Services, Mapper, Views).
-- Datenlogik für Properties und Statements, übertragbar auf alle anderen Entities.
-- Schnittstellen (PHP-Services + JSON-API).
-- Vollständige Beispielimplementierungen für App-Bootstrapping, Immobilien-CRUD, Dashboard-Stub und Statement-Erstellung inklusive Vanilla-JS Frontend und `t()`/`OC.generateUrl`/`OC.requestToken`.
-
-Wenn du möchtest, kann ich im nächsten Schritt speziell die Tenancy-/Transaction-Services und -Views oder das Mieter-Portal detailiert im gleichen Muster ausarbeiten.
+Damit sind UI-Komponenten, Zustände, Views, Navigation und der API-Layer ausschließlich im Frontend (Vanilla JS, Nextcloud-Kontext) definiert – ohne PHP, Entities oder Datenbankdetails.
