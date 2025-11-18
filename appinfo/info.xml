@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>immoapp</id>
+    <name>Immo</name>
+    <summary>Property and tenancy management for Nextcloud</summary>
+    <description><![CDATA[Manage properties, units, tenants, tenancies, transactions and yearly reports directly in Nextcloud.]]></description>
+    <licence>agpl</licence>
+    <author>Nextcloud Agent</author>
+    <namespace>ImmoApp</namespace>
+    <category>tools</category>
+    <version>0.1.0</version>
+    <dependencies>
+        <nextcloud min-version="32" max-version="32"/>
+    </dependencies>
+    <navigations>
+        <navigation>
+            <name>Immo</name>
+            <route>view#index</route>
+            <icon>app</icon>
+            <order>10</order>
+        </navigation>
+    </navigations>
+</info>

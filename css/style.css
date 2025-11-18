@@ -1,0 +1,53 @@
+.immoapp-layout {
+    display: flex;
+    gap: 16px;
+}
+
+.immoapp-sidebar {
+    width: 220px;
+    background: var(--color-background-darker);
+    padding: 16px;
+    border-radius: 8px;
+}
+
+.immoapp-sidebar ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.immoapp-sidebar li {
+    margin-bottom: 8px;
+}
+
+.immoapp-sidebar a {
+    color: var(--color-main-text);
+    text-decoration: none;
+}
+
+.immoapp-content {
+    flex: 1;
+    background: var(--color-background-default);
+    padding: 16px;
+    border-radius: 8px;
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.dashboard-card {
+    background: var(--color-background-dark);
+    padding: 12px;
+    border-radius: 6px;
+}
+
+.dashboard-value {
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.reports-list {
+    padding-left: 16px;
+}
