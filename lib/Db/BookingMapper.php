@@ -1,6 +1,7 @@
 <?php
 namespace OCA\Immo\Db;
 
+use OCP\AppFramework\Db\Entity;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\IDBConnection;
 
@@ -47,15 +48,18 @@ class BookingMapper extends QBMapper {
         return $this->findEntity($qb);
     }
 
-    public function create(Booking $booking): Booking {
+    /** @param Booking $booking */
+    public function create(Entity $booking): Entity {
         return parent::insert($booking);
     }
 
-    public function update(Booking $booking): Booking {
+    /** @param Booking $booking */
+    public function update(Entity $booking): Entity {
         return parent::update($booking);
     }
 
-    public function delete(Booking $booking): int {
+    /** @param Booking $booking */
+    public function delete(Entity $booking): int {
         return parent::delete($booking);
     }
 }

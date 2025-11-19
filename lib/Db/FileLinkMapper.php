@@ -1,6 +1,7 @@
 <?php
 namespace OCA\Immo\Db;
 
+use OCP\AppFramework\Db\Entity;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\IDBConnection;
 
@@ -18,15 +19,18 @@ class FileLinkMapper extends QBMapper {
         return $this->findEntities($qb);
     }
 
-    public function create(FileLink $fileLink): FileLink {
+    /** @param FileLink $fileLink */
+    public function create(Entity $fileLink): Entity {
         return parent::insert($fileLink);
     }
 
-    public function update(FileLink $fileLink): FileLink {
+    /** @param FileLink $fileLink */
+    public function update(Entity $fileLink): Entity {
         return parent::update($fileLink);
     }
 
-    public function delete(FileLink $fileLink): int {
+    /** @param FileLink $fileLink */
+    public function delete(Entity $fileLink): int {
         return parent::delete($fileLink);
     }
 }

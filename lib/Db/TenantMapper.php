@@ -1,6 +1,7 @@
 <?php
 namespace OCA\Immo\Db;
 
+use OCP\AppFramework\Db\Entity;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\IDBConnection;
 
@@ -33,15 +34,18 @@ class TenantMapper extends QBMapper {
         return $this->findEntities($qb);
     }
 
-    public function create(Tenant $tenant): Tenant {
+    /** @param Tenant $tenant */
+    public function create(Entity $tenant): Entity {
         return parent::insert($tenant);
     }
 
-    public function update(Tenant $tenant): Tenant {
+    /** @param Tenant $tenant */
+    public function update(Entity $tenant): Entity {
         return parent::update($tenant);
     }
 
-    public function delete(Tenant $tenant): int {
+    /** @param Tenant $tenant */
+    public function delete(Entity $tenant): int {
         return parent::delete($tenant);
     }
 }

@@ -1,6 +1,7 @@
 <?php
 namespace OCA\Immo\Db;
 
+use OCP\AppFramework\Db\Entity;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\IDBConnection;
 
@@ -48,15 +49,18 @@ class LeaseMapper extends QBMapper {
         return $this->findEntity($qb);
     }
 
-    public function create(Lease $lease): Lease {
+    /** @param Lease $lease */
+    public function create(Entity $lease): Entity {
         return parent::insert($lease);
     }
 
-    public function update(Lease $lease): Lease {
+    /** @param Lease $lease */
+    public function update(Entity $lease): Entity {
         return parent::update($lease);
     }
 
-    public function delete(Lease $lease): int {
+    /** @param Lease $lease */
+    public function delete(Entity $lease): int {
         return parent::delete($lease);
     }
 }

@@ -1,6 +1,7 @@
 <?php
 namespace OCA\Immo\Db;
 
+use OCP\AppFramework\Db\Entity;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\IDBConnection;
 
@@ -35,15 +36,18 @@ class ReportMapper extends QBMapper {
         return $this->findEntity($qb);
     }
 
-    public function create(Report $report): Report {
+    /** @param Report $report */
+    public function create(Entity $report): Entity {
         return parent::insert($report);
     }
 
-    public function update(Report $report): Report {
+    /** @param Report $report */
+    public function update(Entity $report): Entity {
         return parent::update($report);
     }
 
-    public function delete(Report $report): int {
+    /** @param Report $report */
+    public function delete(Entity $report): int {
         return parent::delete($report);
     }
 }

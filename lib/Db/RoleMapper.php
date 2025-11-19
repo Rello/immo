@@ -1,6 +1,7 @@
 <?php
 namespace OCA\Immo\Db;
 
+use OCP\AppFramework\Db\Entity;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\IDBConnection;
 
@@ -17,15 +18,18 @@ class RoleMapper extends QBMapper {
         return $this->findEntities($qb);
     }
 
-    public function create(Role $role): Role {
+    /** @param Role $role */
+    public function create(Entity $role): Entity {
         return parent::insert($role);
     }
 
-    public function update(Role $role): Role {
+    /** @param Role $role */
+    public function update(Entity $role): Entity {
         return parent::update($role);
     }
 
-    public function delete(Role $role): int {
+    /** @param Role $role */
+    public function delete(Entity $role): int {
         return parent::delete($role);
     }
 }

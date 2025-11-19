@@ -1,6 +1,7 @@
 <?php
 namespace OCA\Immo\Db;
 
+use OCP\AppFramework\Db\Entity;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\IDBConnection;
 
@@ -32,15 +33,18 @@ class UnitMapper extends QBMapper {
         return $this->findEntity($qb);
     }
 
-    public function create(Unit $unit): Unit {
+    /** @param Unit $unit */
+    public function create(Entity $unit): Entity {
         return parent::insert($unit);
     }
 
-    public function update(Unit $unit): Unit {
+    /** @param Unit $unit */
+    public function update(Entity $unit): Entity {
         return parent::update($unit);
     }
 
-    public function delete(Unit $unit): int {
+    /** @param Unit $unit */
+    public function delete(Entity $unit): int {
         return parent::delete($unit);
     }
 }

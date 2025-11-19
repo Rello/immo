@@ -90,7 +90,7 @@ class Version1000Date20240501000000 extends SimpleMigrationStep {
             $table->addColumn('unit_id', 'integer', ['notnull' => false]);
             $table->addColumn('lease_id', 'integer', ['notnull' => false]);
             $table->addColumn('year', 'integer');
-            $table->addColumn('is_yearly', 'boolean', ['default' => false]);
+            $table->addColumn('is_yearly', 'boolean', ['notnull' => false]);
             $table->addColumn('created_at', 'integer');
             $table->addColumn('updated_at', 'integer');
             $table->setPrimaryKey(['id']);

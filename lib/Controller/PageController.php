@@ -7,6 +7,7 @@ use OCP\AppFramework\Http\TemplateResponse;
 use OCP\IL10N;
 use OCP\IRequest;
 use OCP\IUserSession;
+use OCP\Util;
 use OCA\Immo\Service\RoleService;
 
 class PageController extends Controller {
@@ -22,6 +23,9 @@ class PageController extends Controller {
     #[\OCP\AppFramework\Http\Attributes\NoAdminRequired]
     #[\OCP\AppFramework\Http\Attributes\NoCSRFRequired]
     public function index(): TemplateResponse {
+        Util::addScript(Application::APP_ID, 'immo-main');
+        Util::addStyle(Application::APP_ID, 'style');
+
         $user = $this->userSession->getUser();
         $role = 'verwalter';
         if ($user) {

@@ -9,5 +9,3 @@
 <script>
 window.ImmoCurrentUserRole = <?php print_unescaped(json_encode($_['currentRole'])); ?>;
 </script>
-<script src="<?php print_unescaped(\OCP\Util::linkToScript('immo', 'immo-main')); ?>"></script>
-<link rel="stylesheet" href="<?php print_unescaped(\OCP\Util::linkTo('immo', 'css/style.css')); ?>">
