@@ -4,7 +4,6 @@ namespace OCA\Immo\Db;
 use OCP\AppFramework\Db\Entity;
 
 class Tenant extends Entity {
-    protected ?int $id = null;
     protected string $uidOwner = '';
     protected ?string $uidUser = null;
     protected string $name = '';

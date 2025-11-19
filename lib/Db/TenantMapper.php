@@ -39,13 +39,13 @@ class TenantMapper extends QBMapper {
         return parent::insert($tenant);
     }
 
-    /** @param Tenant $tenant */
-    public function update(Entity $tenant): Entity {
-        return parent::update($tenant);
+    /** @param Tenant $entity */
+    public function update(Entity $entity): Entity {
+        return parent::update($entity);
     }
 
-    /** @param Tenant $tenant */
-    public function delete(Entity $tenant): Entity {
-        return parent::delete($tenant);
+    /** @param Tenant $entity */
+    public function delete(Entity $entity): Entity {
+        return parent::delete($entity);
     }
 }
