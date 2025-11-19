@@ -1,0 +1,18 @@
+#app-content {
+    padding: 16px;
+}
+
+.immo-view h2 {
+    margin-bottom: 12px;
+}
+
+.immo-cards {
+    display: flex;
+    gap: 12px;
+}
+
+.immo-cards .card {
+    background: var(--color-background-hover);
+    padding: 12px;
+    border-radius: 8px;
+}
