@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>immo</id>
+    <name>Immo</name>
+    <summary>Immobilienverwaltung für Nextcloud</summary>
+    <description>Verwalte Immobilien, Mietobjekte, Mieter, Mietverträge und Abrechnungen direkt in Nextcloud.</description>
+    <version>0.2.0</version>
+    <licence>agpl</licence>
+    <author>Nextcloud AI</author>
+    <namespace>Immo</namespace>
+    <category>office</category>
+    <bugs>https://example.com</bugs>
+    <dependencies>
+        <nextcloud min-version="32" max-version="32"/>
+        <php min-version="8.2"/>
+    </dependencies>
+    <navigations>
+        <navigation>
+            <name>Immo</name>
+            <route>immo.page.index</route>
+            <icon>img/icon.svg</icon>
+        </navigation>
+    </navigations>
+</info>

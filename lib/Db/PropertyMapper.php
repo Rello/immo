@@ -1,0 +1,45 @@
+<?php
+namespace OCA\Immo\Db;
+
+use OCP\AppFramework\Db\Entity;
+use OCP\AppFramework\Db\QBMapper;
+use OCP\IDBConnection;
+
+class PropertyMapper extends QBMapper {
+    public function __construct(IDBConnection $db) {
+        parent::__construct($db, 'immo_prop', Property::class);
+    }
+
+    /** @return Property[] */
+    public function findByOwner(string $uid): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from('immo_prop')
+            ->where($qb->expr()->eq('uid_owner', $qb->createNamedParameter($uid)));
+        return $this->findEntities($qb);
+    }
+
+    public function findByIdForOwner(int $id, string $uid): ?Property {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from('immo_prop')
+            ->where($qb->expr()->eq('id', $qb->createNamedParameter($id)))
+            ->andWhere($qb->expr()->eq('uid_owner', $qb->createNamedParameter($uid)));
+        return $this->findEntity($qb);
+    }
+
+    /** @param Property $property */
+    public function create(Entity $property): Entity {
+        return parent::insert($property);
+    }
+
+    /** @param Property $property */
+    public function update(Entity $property): Entity {
+        return parent::update($property);
+    }
+
+    /** @param Property $property */
+    public function delete(Entity $property): Entity {
+        return parent::delete($property);
+    }
+}
