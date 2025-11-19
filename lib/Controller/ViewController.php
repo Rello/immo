@@ -4,6 +4,8 @@ namespace OCA\Immo\Controller;
 use OCA\Immo\AppInfo\Application;
 use OCA\Immo\Service\DashboardService;
 use OCP\AppFramework\Controller;
+use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\TemplateResponse;
 use OCP\IL10N;
 use OCP\IRequest;
@@ -17,8 +19,8 @@ class ViewController extends Controller {
         parent::__construct(Application::APP_ID, $request);
     }
 
-    #[\OCP\AppFramework\Http\Attributes\NoAdminRequired]
-    #[\OCP\AppFramework\Http\Attributes\NoCSRFRequired]
+	#[NoAdminRequired]
+	#[NoCSRFRequired]
     public function dashboard(): TemplateResponse {
         $data = $this->dashboardService->getDashboardData((int)date('Y'));
         return new TemplateResponse(Application::APP_ID, 'view/dashboard', ['data' => $data, 'l' => $this->l10n]);

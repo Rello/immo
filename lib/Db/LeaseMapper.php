@@ -60,7 +60,7 @@ class LeaseMapper extends QBMapper {
     }
 
     /** @param Lease $lease */
-    public function delete(Entity $lease): int {
+    public function delete(Entity $lease): Entity {
         return parent::delete($lease);
     }
 }

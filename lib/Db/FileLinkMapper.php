@@ -30,7 +30,7 @@ class FileLinkMapper extends QBMapper {
     }
 
     /** @param FileLink $fileLink */
-    public function delete(Entity $fileLink): int {
+    public function delete(Entity $fileLink): Entity {
         return parent::delete($fileLink);
     }
 }

@@ -45,7 +45,7 @@ class TenantMapper extends QBMapper {
     }
 
     /** @param Tenant $tenant */
-    public function delete(Entity $tenant): int {
+    public function delete(Entity $tenant): Entity {
         return parent::delete($tenant);
     }
 }

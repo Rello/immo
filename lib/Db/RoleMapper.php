@@ -29,7 +29,7 @@ class RoleMapper extends QBMapper {
     }
 
     /** @param Role $role */
-    public function delete(Entity $role): int {
+    public function delete(Entity $role): Entity {
         return parent::delete($role);
     }
 }

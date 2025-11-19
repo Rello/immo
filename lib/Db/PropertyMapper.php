@@ -39,7 +39,7 @@ class PropertyMapper extends QBMapper {
     }
 
     /** @param Property $property */
-    public function delete(Entity $property): int {
+    public function delete(Entity $property): Entity {
         return parent::delete($property);
     }
 }

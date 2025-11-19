@@ -1,4 +1,7 @@
 <?php
+use OCP\Util;
+Util::addScript('immo', 'immo-main');
+Util::addStyle('immo', 'style');
 /** @var array $_ */
 ?>
 <div id="app-navigation"></div>

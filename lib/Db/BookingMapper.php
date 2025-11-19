@@ -59,7 +59,7 @@ class BookingMapper extends QBMapper {
     }
 
     /** @param Booking $booking */
-    public function delete(Entity $booking): int {
+    public function delete(Entity $booking): Entity {
         return parent::delete($booking);
     }
 }

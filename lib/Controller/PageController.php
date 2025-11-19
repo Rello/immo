@@ -1,7 +1,8 @@
 <?php
 namespace OCA\Immo\Controller;
 
-use OCA\Immo\AppInfo\Application;
+use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\TemplateResponse;
 use OCP\IL10N;
@@ -12,19 +13,18 @@ use OCA\Immo\Service\RoleService;
 
 class PageController extends Controller {
     public function __construct(
-        IRequest $request,
+		string $appName,
+		IRequest $request,
         private IL10N $l10n,
         private IUserSession $userSession,
         private RoleService $roleService
     ) {
-        parent::__construct(Application::APP_ID, $request);
+        parent::__construct($appName, $request);
     }
 
-    #[\OCP\AppFramework\Http\Attributes\NoAdminRequired]
-    #[\OCP\AppFramework\Http\Attributes\NoCSRFRequired]
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
     public function index(): TemplateResponse {
-        Util::addScript(Application::APP_ID, 'immo-main');
-        Util::addStyle(Application::APP_ID, 'style');
 
         $user = $this->userSession->getUser();
         $role = 'verwalter';
@@ -34,7 +34,7 @@ class PageController extends Controller {
                 $role = 'mieter';
             }
         }
-        return new TemplateResponse(Application::APP_ID, 'index', [
+        return new TemplateResponse('immo', 'index', [
             'pageTitle' => $this->l10n->t('Immo'),
             'currentRole' => $role,
             'userId' => $user ? $user->getUID() : '',

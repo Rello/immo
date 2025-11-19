@@ -1,7 +1,7 @@
 <?php
 namespace OCA\Immo\Service;
 
-use OCP\DB\IDBConnection;
+use OCP\IDBConnection;
 use OCP\IGroupManager;
 
 class RoleService {

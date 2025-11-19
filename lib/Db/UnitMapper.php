@@ -44,7 +44,7 @@ class UnitMapper extends QBMapper {
     }
 
     /** @param Unit $unit */
-    public function delete(Entity $unit): int {
+    public function delete(Entity $unit): Entity {
         return parent::delete($unit);
     }
 }

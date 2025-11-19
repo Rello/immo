@@ -5,7 +5,7 @@
     <name>Immo</name>
     <summary>Immobilienverwaltung für Nextcloud</summary>
     <description>Verwalte Immobilien, Mietobjekte, Mieter, Mietverträge und Abrechnungen direkt in Nextcloud.</description>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
     <licence>agpl</licence>
     <author>Nextcloud AI</author>
     <namespace>Immo</namespace>

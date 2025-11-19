@@ -47,7 +47,7 @@ class ReportMapper extends QBMapper {
     }
 
     /** @param Report $report */
-    public function delete(Entity $report): int {
+    public function delete(Entity $report): Entity {
         return parent::delete($report);
     }
 }
