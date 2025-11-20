@@ -27,7 +27,7 @@ class Tenant extends Entity {
     }
 
     public function setId(?int $id): void {
-        $this->id = $id;
+        $this->setter('id', $id);
     }
 
     public function getUidOwner(): string {
@@ -35,7 +35,7 @@ class Tenant extends Entity {
     }
 
     public function setUidOwner(string $uidOwner): void {
-        $this->uidOwner = $uidOwner;
+        $this->setter('uidOwner', $uidOwner);
     }
 
     public function getUidUser(): ?string {
@@ -43,7 +43,7 @@ class Tenant extends Entity {
     }
 
     public function setUidUser(?string $uidUser): void {
-        $this->uidUser = $uidUser;
+        $this->setter('uidUser', $uidUser);
     }
 
     public function getName(): string {
@@ -51,7 +51,7 @@ class Tenant extends Entity {
     }
 
     public function setName(string $name): void {
-        $this->name = $name;
+        $this->setter('name', $name);
     }
 
     public function getAddr(): ?string {
@@ -59,7 +59,7 @@ class Tenant extends Entity {
     }
 
     public function setAddr(?string $addr): void {
-        $this->addr = $addr;
+        $this->setter('addr', $addr);
     }
 
     public function getEmail(): ?string {
@@ -67,7 +67,7 @@ class Tenant extends Entity {
     }
 
     public function setEmail(?string $email): void {
-        $this->email = $email;
+        $this->setter('email', $email);
     }
 
     public function getPhone(): ?string {
@@ -75,7 +75,7 @@ class Tenant extends Entity {
     }
 
     public function setPhone(?string $phone): void {
-        $this->phone = $phone;
+        $this->setter('phone', $phone);
     }
 
     public function getCustNo(): ?string {
@@ -83,7 +83,7 @@ class Tenant extends Entity {
     }
 
     public function setCustNo(?string $custNo): void {
-        $this->custNo = $custNo;
+        $this->setter('custNo', $custNo);
     }
 
     public function getNote(): ?string {
@@ -91,7 +91,7 @@ class Tenant extends Entity {
     }
 
     public function setNote(?string $note): void {
-        $this->note = $note;
+        $this->setter('note', $note);
     }
 
     public function getCreatedAt(): int {
@@ -99,7 +99,7 @@ class Tenant extends Entity {
     }
 
     public function setCreatedAt(int $createdAt): void {
-        $this->createdAt = $createdAt;
+        $this->setter('createdAt', $createdAt);
     }
 
     public function getUpdatedAt(): int {
@@ -107,6 +107,6 @@ class Tenant extends Entity {
     }
 
     public function setUpdatedAt(int $updatedAt): void {
-        $this->updatedAt = $updatedAt;
+        $this->setter('updatedAt', $updatedAt);
     }
 }
