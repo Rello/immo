@@ -1,0 +1,29 @@
+{
+  "name": "rello/immo",
+  "description": "Immo Nextcloud app",
+  "type": "project",
+  "require": {
+    "php": "^8.0"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^9.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "OCA\\Immo\\": "lib/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "OCA\\Immo\\Tests\\": "tests/"
+    }
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true,
+  "config": {
+    "optimize-autoloader": true
+  },
+  "scripts": {
+    "test": "phpunit"
+  }
+}
