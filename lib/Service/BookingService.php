@@ -4,6 +4,7 @@ namespace OCA\Immo\Service;
 use OCA\Immo\Db\Booking;
 use OCA\Immo\Db\BookingMapper;
 use OCA\Immo\Db\PropertyMapper;
+use OCA\Immo\Service\AllocationService;
 use OCP\IUserSession;
 use RuntimeException;
 
@@ -12,7 +13,8 @@ class BookingService {
         private BookingMapper $mapper,
         private PropertyMapper $propertyMapper,
         private RoleService $roleService,
-        private IUserSession $userSession
+        private IUserSession $userSession,
+        private AllocationService $allocationService
     ) {
     }
 
@@ -61,7 +63,24 @@ class BookingService {
         $booking->setIsYearly(!empty($data['isYearly']));
         $booking->setCreatedAt(time());
         $booking->setUpdatedAt(time());
-        return $this->mapper->insert($booking);
+        $inserted = $this->mapper->insert($booking);
+
+        // If this is a yearly transaction, attempt allocations (idempotent)
+        if ($inserted->getIsYearly()) {
+            $txId = $inserted->getId();
+            if (!$this->allocationService->hasAllocationsForTransaction($txId)) {
+                // may throw RuntimeException if allocation cannot be performed
+                $this->allocationService->allocateAnnualTransaction(
+                    $txId,
+                    $inserted->getPropId(),
+                    $inserted->getYear(),
+                    $inserted->getAmt(),
+                    $uid
+                );
+            }
+        }
+
+        return $inserted;
     }
 
     public function update(int $id, array $data): Booking {
@@ -76,7 +95,23 @@ class BookingService {
         $booking->setIsYearly(isset($data['isYearly']) ? (bool)$data['isYearly'] : $booking->getIsYearly());
         $booking->setYear((int)substr($booking->getDate(), 0, 4));
         $booking->setUpdatedAt(time());
-        return $this->mapper->update($booking);
+        $updated = $this->mapper->update($booking);
+
+        // If toggled/kept as yearly, ensure allocations exist (idempotent)
+        if ($updated->getIsYearly()) {
+            $txId = $updated->getId();
+            if (!$this->allocationService->hasAllocationsForTransaction($txId)) {
+                $this->allocationService->allocateAnnualTransaction(
+                    $txId,
+                    $updated->getPropId(),
+                    $updated->getYear(),
+                    $updated->getAmt(),
+                    $this->uid()
+                );
+            }
+        }
+
+        return $updated;
     }
 
     public function delete(int $id): void {
