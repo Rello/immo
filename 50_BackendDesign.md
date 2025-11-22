@@ -2,456 +2,143 @@
 
 ## Endpunkte
 
+- `PageController@index` – liefert Grundlayout (Server-Template).
 - `ViewController`
-  - `GET /apps/immoapp/` → Grundlayout (Server-Template)
+  - `dashboard()` → HTML für Dashboard (AJAX GET).
+  - `propertyList()`, `unitList()`, `tenantList()`, `leaseList()`, `bookingList()`, `reportList()` → HTML-Partials für Navigation.
+  - `propertyDetail($id)` etc. → Detail-HTML inkl. Filelinks.
+- API-Controller (alle JSON, `/apps/immo/api/...`)
+  - `PropertyController` – `list`, `get`, `create`, `update`, `delete`.
+  - `UnitController`, `TenantController`, `LeaseController`, `BookingController`, analoges CRUD.
+  - `DashboardController@getMetrics`.
+  - `StatsController@getYearDistribution`.
+  - `ReportController` – `listByProperty`, `createForProperty`, `get`.
+  - `FileLinkController` – `list`, `create`, `delete`.
 
-- `DashboardController`
-  - `GET /apps/immoapp/api/dashboard/stats` → Aggregierte Kennzahlen (optional: `year`, `propertyId`)
-
-- `PropertyController`
-  - `GET /apps/immoapp/api/properties`
-  - `GET /apps/immoapp/api/properties/{id}`
-  - `POST /apps/immoapp/api/properties`
-  - `PUT /apps/immoapp/api/properties/{id}`
-  - `DELETE /apps/immoapp/api/properties/{id}`
-
-- `UnitController`
-  - `GET /apps/immoapp/api/units?propertyId=`
-  - `GET /apps/immoapp/api/units/{id}`
-  - `POST /apps/immoapp/api/units`
-  - `PUT /apps/immoapp/api/units/{id}`
-  - `DELETE /apps/immoapp/api/units/{id}`
-
-- `TenantController`
-  - `GET /apps/immoapp/api/tenants`
-  - `GET /apps/immoapp/api/tenants/{id}`
-  - `POST /apps/immoapp/api/tenants`
-  - `PUT /apps/immoapp/api/tenants/{id}`
-  - `DELETE /apps/immoapp/api/tenants/{id}`
-
-- `TenancyController`
-  - `GET /apps/immoapp/api/tenancies?unitId=&tenantId=&propertyId=&status=&year=`
-  - `GET /apps/immoapp/api/tenancies/{id}`
-  - `POST /apps/immoapp/api/tenancies`
-  - `PUT /apps/immoapp/api/tenancies/{id}`
-  - `DELETE /apps/immoapp/api/tenancies/{id}`
-
-- `TransactionController`
-  - `GET /apps/immoapp/api/transactions?year=&propertyId=&unitId=&tenancyId=&type=&category=`
-  - `GET /apps/immoapp/api/transactions/{id}`
-  - `POST /apps/immoapp/api/transactions`
-  - `PUT /apps/immoapp/api/transactions/{id}`
-  - `DELETE /apps/immoapp/api/transactions/{id}`
-
-- `DocumentLinkController`
-  - `GET /apps/immoapp/api/doc-links/{entityType}/{entityId}`
-  - `POST /apps/immoapp/api/doc-links`
-  - `DELETE /apps/immoapp/api/doc-links/{id}`
-
-- `AccountingController`
-  - `POST /apps/immoapp/api/reports` (Erstelle Report)
-  - `GET /apps/immoapp/api/reports?propertyId=&year=&tenancyId=&tenantId=`
-  - `GET /apps/immoapp/api/reports/{id}` (Metadaten; Datei via Files-App)
-
-- `UserController`
-  - `GET /apps/immoapp/api/me` (Rolle, Basis-Kontext für Frontend)
+Alle Routen werden in `appinfo/routes.php` registriert, mit Attributen `#[NoAdminRequired]` und – falls GET-HTML – zusätzlich `#[NoCSRFRequired]`.
 
 ## Datenmodelle
 
-### Property (`immo_properties`)
-- `id` (int, PK)
-- `owner_uid` (string, NC-User)
-- `name` (string)
-- `street` (string, nullable)
-- `zip` (string, nullable)
-- `city` (string, nullable)
-- `country` (string, nullable)
-- `type` (string, nullable)
-- `notes` (text, nullable)
-- `created_at` (int, timestamp)
-- `updated_at` (int, timestamp)
+(Datenbank-Migrationen erzeugen Tabellen mit ≤20 Zeichen für Namen/Spalten.)
 
-### Unit (`immo_units`)
-- `id` (int, PK)
-- `property_id` (int, FK → `immo_properties`)
-- `label` (string)
-- `unit_number` (string, nullable)
-- `land_register` (string, nullable)
-- `living_area` (float, nullable)
-- `usable_area` (float, nullable)
-- `type` (string, nullable)
-- `notes` (text, nullable)
+| Entity        | Tabelle       | Wichtige Felder (CamelCase)                                           |
+|---------------|---------------|------------------------------------------------------------------------|
+| Property      | `immo_prop`   | `uidOwner`, `name`, `street`, `zip`, `city`, `country`, `type`, `note`, `createdAt`, `updatedAt` |
+| Unit          | `immo_unit`   | `propId`, `label`, `loc`, `gbook`, `areaRes`, `areaUse`, `type`, `note`, `createdAt`, `updatedAt` |
+| Tenant        | `immo_tenant` | `uidOwner`, `uidUser`, `name`, `addr`, `email`, `phone`, `custNo`, `note`, `createdAt`, `updatedAt` |
+| Lease         | `immo_lease`  | `unitId`, `tenantId`, `start`, `end`, `rentCold`, `costs`, `costsType`, `deposit`, `cond`, `status`, `createdAt`, `updatedAt` |
+| Booking       | `immo_book`   | `type`, `cat`, `date`, `amt`, `desc`, `propId`, `unitId`, `leaseId`, `year`, `isYearly`, `createdAt`, `updatedAt` |
+| FileLink      | `immo_filelink` | `objType`, `objId`, `fileId`, `path`, `createdAt` |
+| Report        | `immo_report` | `propId`, `year`, `fileId`, `path`, `createdAt` |
+| Role          | `immo_role`   | `uid`, `role`, `createdAt` |
 
-### Tenant (`immo_tenants`)
-- `id` (int, PK)
-- `owner_uid` (string, Verwalter)
-- `nc_user_id` (string, nullable, Nextcloud-User für Mieter)
-- `name` (string)
-- `address` (string, nullable)
-- `email` (string, nullable)
-- `phone` (string, nullable)
-- `customer_ref` (string, nullable)
-- `notes` (text, nullable)
-
-### Tenancy (`immo_tenancies`)
-- `id` (int, PK)
-- `property_id` (int, FK)
-- `unit_id` (int, FK)
-- `tenant_id` (int, FK)
-- `start_date` (date)
-- `end_date` (date, nullable)
-- `rent_cold` (decimal(12,2))
-- `service_charge` (decimal(12,2), nullable)
-- `service_charge_is_prepayment` (bool)
-- `deposit` (decimal(12,2), nullable)
-- `conditions` (text, nullable)
-
-### Transaction (`immo_transactions`)
-- `id` (int, PK)
-- `owner_uid` (string)
-- `property_id` (int)
-- `unit_id` (int, nullable)
-- `tenancy_id` (int, nullable)
-- `type` (string: `income`|`expense`)
-- `category` (string)
-- `date` (date)
-- `amount` (decimal(12,2))
-- `description` (text, nullable)
-- `year` (int)
-- `is_annual` (bool)
-
-### DocumentLink (`immo_doc_links`)
-- `id` (int, PK)
-- `owner_uid` (string)
-- `entity_type` (string: `property|unit|tenant|tenancy|transaction|report`)
-- `entity_id` (int)
-- `file_id` (int)
-- `path` (string)
-
-### Report (`immo_reports`)
-- `id` (int, PK)
-- `owner_uid` (string)
-- `property_id` (int)
-- `tenancy_id` (int, nullable)
-- `tenant_id` (int, nullable)
-- `year` (int)
-- `file_id` (int)
-- `path` (string)
-- `created_at` (int, timestamp)
-
-### AnnualDistribution (`immo_annual_distribution`)
-- `id` (int, PK)
-- `transaction_id` (int, FK → `immo_transactions`)
-- `tenancy_id` (int, FK → `immo_tenancies`)
-- `year` (int)
-- `months` (int)
-- `allocated_amount` (decimal(12,2))
+Mapper pro Entity erweitern `QBMapper`. Entities benutzen AppFramework-Annotations (`@Entity`, `@Column`), Getter/Setter werden automatisch generiert.
 
 ## Geschäftslogik
 
-### Rollen & Sicherheit
-- `UserRoleService`
-  - Liest aktuelle User-ID via `IUserSession`.
-  - Ermittelt Rolle:
-    - Verwalter: Mitglied in konfigurierter Gruppe (z. B. `immo_admin`).
-    - Mieter: Mitglied in `immo_tenant`.
-  - Für Mieter: Match `Tenant.nc_user_id = currentUserId`.
-- Alle Services filtern immer:
-  - Verwalter: `owner_uid = currentUser`.
-  - Mieter: nur eigene Tenancies/Reports/Dokumente via `nc_user_id`.
+- **RoleService**
+  - Kombiniert `immo_role` mit Nextcloud-Gruppen (`immo_verwalter`, `immo_mieter`).
+  - Methoden: `requireManager($uid)`, `isTenant($uid)`, `getTenantIdsForUser($uid)`.
 
-### PropertyService
-- CRUD für `immo_properties`.
-- Beim Anlegen: `owner_uid = currentUser`.
-- Beim Lesen/Ändern/Löschen: Check `owner_uid`.
-- Zusatzfunktionen:
-  - `getStatsForProperty(propertyId, year)`:
-    - Anzahl Units.
-    - Anzahl aktive Tenancies im Jahr.
-    - Summen Einnahmen/Ausgaben.
+- **PropertyService**
+  - `listByOwner($uid)` filtert per `uidOwner`.
+  - `assertOwnership($propertyId, $uid)` verhindert Fremdzugriff.
+  - Setzt `createdAt/updatedAt`.
 
-### UnitService
-- CRUD mit Pflicht-Check: Property gehört currentUser.
-- Berechnung:
-  - `getRentPerSqm(unitId, date)`:
-    - aktives Tenancy zum Datum.
-    - `rent_cold / living_area`, falls gesetzt.
+- **UnitService**
+  - Beim Erstellen/Update wird über PropertyService geprüft, dass Unit zur Immobilie des Users gehört.
+  - Berechnet abgeleitete Kennzahlen (z. B. belegte Flächen).
 
-### TenantService
-- CRUD unter `owner_uid`.
-- Optional Synchronisierung `nc_user_id` (keine automatische User-Erzeugung).
+- **TenantService**
+  - Verknüpft `uidUser` für Mieter, damit Mietersicht funktioniert.
+  - Verhindert Duplicate `custNo` pro Verwalter.
 
-### TenancyService
-- CRUD für Mietverhältnisse:
-  - Validierung: `tenant.owner_uid == currentUser`, Unit/Property gehören currentUser.
-  - Statusberechnung (on-the-fly):
-    - `active`|`future`|`past` basierend auf `start_date`/`end_date` vs. heute / Jahr.
-- Business:
-  - `getTenanciesForYear(propertyId, year)` mit Status.
-  - Monatsberechnung für Verteilungen:
-    - Für ein Jahr: Anzahl belegter Monate zwischen `start_date`/`end_date`.
+- **LeaseService**
+  - Bei Speicherung: Statusberechnung anhand Datum.
+  - `assertReadable($leaseId, $uid)` berücksichtigt sowohl Verwalter als auch Mietersicht (über `uidUser` des Tenants).
+  - Stellt Hilfsfunktionen für Monatsberechnung (Anzahl Monate in Jahr).
 
-### TransactionService
-- CRUD für Einnahmen/Ausgaben:
-  - Ableitung `year` aus `date`.
-  - Validierung:
-    - Property gehört currentUser.
-    - Unit/Tenancy (falls gesetzt) gehören zur Property und currentUser.
-- Filterlogik in Listenendpunkt:
-  - `owner_uid`, `year`, `property_id`, optional `unit_id`, `tenancy_id`, `type`, `category`.
+- **BookingService**
+  - `create()`/`update()` berechnet `year` aus `date`.
+  - Validiert `amt >= 0`.
+  - Prüft FK-Kette (Booking → Property (uidOwner) → Unit/Lease falls gesetzt).
+  - Aggregationsmethoden für ReportService.
 
-### AccountingService
-- `createReport(propertyId, year, tenancyId?, tenantId?)`:
-  - Zugriffskontrolle via Property/Owner.
-  - Ermittlung Transaktionen für Immobilie+Jahr.
-  - Berücksichtigung Verteilungen `immo_annual_distribution` für Jahresbeträge.
-  - Aggregation:
-    - Summe Einnahmen nach Kategorie.
-    - Summe Ausgaben nach Kategorie.
-    - Netto-Ergebnis.
-  - Kennzahlen:
-    - Rendite: Netto-Ergebnis / Summe Ausgaben (vereinfachte Definition).
-  - Übergibt aggregierte Daten an `ReportFileService`.
-  - Speichert Datensatz in `immo_reports` + `immo_doc_links`.
+- **DashboardService**
+  - Nutzt oben genannte Services/Mapper, liefert Kennzahlen (Counts, Summen, m²-Miete).
 
-- `distributeAnnual(transactionId)`:
-  - Holt Transaction (`is_annual = true`).
-  - Ermittelt alle Tenancies der Immobilie im Jahr.
-  - Berechnet belegte Monate pro Tenancy.
-  - Verteilt `amount` proportional:
-    - `allocated_amount = amount * (months_tenancy / sum_all_months)`.
-  - Schreibt `immo_annual_distribution`-Datensätze.
+- **ReportService**
+  - Holt alle Buchungen per Jahr/Immobilie, erzeugt Summen nach Kategorien.
+  - Ermittelt Kaltmiete-Soll aus Leases (monatsgenau im Jahr).
+  - Baut Markdown-Text (Strings via IL10N).
+  - Nutzt `FilesystemService` für Dateiablage und erzeugt `Report` + `FileLink`.
+  - `getYearDistribution(propId, year)` berechnet anteilige Verteilung von `isYearly`-Buchungen über aktive Leases.
 
-### ReportFileService
-- Nutzung `IRootFolder`/`IUserFolder`:
-  - Pfad: `/ImmoApp/Abrechnungen/<year>/<propertyName>/`.
-  - Erzeugt Ordner falls nötig.
-- Erzeugt einfache Markdown/Text-Datei:
-  - Header mit L10N (`IL10N`).
-  - Tabellen mit Summen/Kategorien.
-- Speichert Datei:
-  - Gibt `file_id` und `path` zurück.
+- **FileLinkService**
+  - Validiert Zugriff auf Objekt (Property/Unit/etc.) und Datei (über `IRootFolder`).
+  - Speichert Pfad/Node-Name für Anzeige.
 
-### DashboardService (intern im DashboardController)
-- `getDashboardStats(userId, year?, propertyId?)`:
-  - Anzahl Properties/Units.
-  - Aktive Tenancies.
-  - Soll-Miete: Summe `rent_cold` aktiver Tenancies im Jahr (Monatsmiete * 12 / Monate im Mietverhältnis; MVP: einfache Summe).
-  - Miete/m² (aggregiert).
-  - Summe Einnahmen/Ausgaben im Jahr.
-  - Offene Punkte:
-    - Tenancies mit Start/Ende innerhalb bestimmter Zukunft/ Vergangenheit.
-    - Transactions ohne `category` oder ohne `tenancy_id`.
+- **FilesystemService**
+  - Arbeitet im Nutzerkontext (Verwalter). Pfade: `/ImmoApp/Abrechnungen/<year>/<propertyNameSanitized>/`.
+  - Erzeugt Datei, liefert `fileId` + `path`.
 
 ## Fehlerfälle
 
-- Authentifizierung
-  - Nicht angemeldet → `401` (Nextcloud Handhabung).
-- Autorisierung
-  - Benutzer ohne Rolle → `403` mit generischer Meldung.
-  - Zugriff auf fremde Property/Tenant/Tenancy/Transaction → `403`.
-- Validierung
-  - Fehlende Pflichtfelder → `400`, JSON mit Feldfehlern.
-  - Ungültige Datums- oder Betragsformate → `400`.
-  - Inkonsistente Referenzen (Tenancy mit fremder Immobilie) → `400`.
-- Geschäftslogik
-  - `distributeAnnual` ohne passende Tenancies → `409` (Konflikt) + Meldung.
-  - Duplikat-Links (gleiche Datei auf gleiche Entity) → `409` optionale Logik.
-- Technisch
-  - DB-Fehler → `500`, Logging via `ILogger`.
-  - Filesystem-Fehler beim Erstellen eines Reports → `500`, Meldung „Erstellung der Abrechnung fehlgeschlagen“.
+| Situation | Reaktion |
+|-----------|----------|
+| User ohne Rolle | `HttpException(403, $l->t('Access denied.'))` |
+| Zugriff auf fremde Immobilie/Mietobjekt | `HttpException(404)` (keine Info-Leak) |
+| Ungültige Payload (z. B. fehlende Pflichtfelder) | `HttpException(400, $l->t('Missing or invalid data.'))` |
+| Datei nicht auffindbar oder ohne Rechte | `HttpException(400, $l->t('File is not accessible.'))` |
+| Report doppelt für Jahr/Immobilie | Option: neue Version anlegen – kein Fehler, aber `path` mit Suffix; falls strikt: `409 Conflict`. |
+| Datenbankfehler | Logger (`ILogger`), Response 500 generisch. |
+| Jahresverteilung ohne aktive Leases | JSON mit leerer Verteilung; Info-Text via `message`. |
 
 ## Beispielcode
 
-### Application.php (Bootstrap)
-
 ```php
 <?php
 
-namespace OCA\ImmoApp\AppInfo;
+namespace OCA\Immo\Controller;
 
-use OCP\AppFramework\App;
-use OCP\AppFramework\Bootstrap\IBootstrap;
-use OCP\AppFramework\Bootstrap\IRegistrationContext;
-use OCP\AppFramework\Bootstrap\IBootContext;
-
-class Application extends App implements IBootstrap {
-	public const APP_ID = 'immoapp';
-
-	public function __construct(array $urlParams = []) {
-		parent::__construct(self::APP_ID, $urlParams);
-	}
-
-	public function register(IRegistrationContext $context): void {
-		// Services werden via DI-Container (info.xml + automatic wiring) bereitgestellt
-	}
-
-	public function boot(IBootContext $context): void {
-		// ggf. Event-Listener registrieren
-	}
-}
-```
-
-### routes.php
-
-```php
-<?php
-
-return [
-	'routes' => [
-		['name' => 'view#index', 'url' => '/', 'verb' => 'GET'],
-
-		['name' => 'user#me', 'url' => '/api/me', 'verb' => 'GET'],
-
-		['name' => 'dashboard#stats', 'url' => '/api/dashboard/stats', 'verb' => 'GET'],
-
-		['name' => 'property#index', 'url' => '/api/properties', 'verb' => 'GET'],
-		['name' => 'property#show',  'url' => '/api/properties/{id}', 'verb' => 'GET'],
-		['name' => 'property#create','url' => '/api/properties', 'verb' => 'POST'],
-		['name' => 'property#update','url' => '/api/properties/{id}', 'verb' => 'PUT'],
-		['name' => 'property#destroy','url' => '/api/properties/{id}', 'verb' => 'DELETE'],
-
-		['name' => 'unit#index', 'url' => '/api/units', 'verb' => 'GET'],
-		['name' => 'unit#show',  'url' => '/api/units/{id}', 'verb' => 'GET'],
-		['name' => 'unit#create','url' => '/api/units', 'verb' => 'POST'],
-		['name' => 'unit#update','url' => '/api/units/{id}', 'verb' => 'PUT'],
-		['name' => 'unit#destroy','url' => '/api/units/{id}', 'verb' => 'DELETE'],
-
-		['name' => 'tenant#index', 'url' => '/api/tenants', 'verb' => 'GET'],
-		['name' => 'tenant#show',  'url' => '/api/tenants/{id}', 'verb' => 'GET'],
-		['name' => 'tenant#create','url' => '/api/tenants', 'verb' => 'POST'],
-		['name' => 'tenant#update','url' => '/api/tenants/{id}', 'verb' => 'PUT'],
-		['name' => 'tenant#destroy','url' => '/api/tenants/{id}', 'verb' => 'DELETE'],
-
-		['name' => 'tenancy#index', 'url' => '/api/tenancies', 'verb' => 'GET'],
-		['name' => 'tenancy#show',  'url' => '/api/tenancies/{id}', 'verb' => 'GET'],
-		['name' => 'tenancy#create','url' => '/api/tenancies', 'verb' => 'POST'],
-		['name' => 'tenancy#update','url' => '/api/tenancies/{id}', 'verb' => 'PUT'],
-		['name' => 'tenancy#destroy','url' => '/api/tenancies/{id}', 'verb' => 'DELETE'],
-
-		['name' => 'transaction#index', 'url' => '/api/transactions', 'verb' => 'GET'],
-		['name' => 'transaction#show',  'url' => '/api/transactions/{id}', 'verb' => 'GET'],
-		['name' => 'transaction#create','url' => '/api/transactions', 'verb' => 'POST'],
-		['name' => 'transaction#update','url' => '/api/transactions/{id}', 'verb' => 'PUT'],
-		['name' => 'transaction#destroy','url' => '/api/transactions/{id}', 'verb' => 'DELETE'],
-
-		['name' => 'doc_link#index', 'url' => '/api/doc-links/{entityType}/{entityId}', 'verb' => 'GET'],
-		['name' => 'doc_link#create','url' => '/api/doc-links', 'verb' => 'POST'],
-		['name' => 'doc_link#destroy','url' => '/api/doc-links/{id}', 'verb' => 'DELETE'],
-
-		['name' => 'accounting#createReport','url' => '/api/reports', 'verb' => 'POST'],
-		['name' => 'accounting#index','url' => '/api/reports', 'verb' => 'GET'],
-		['name' => 'accounting#show','url' => '/api/reports/{id}', 'verb' => 'GET'],
-	],
-];
-```
-
-### PropertyController (Ausschnitt)
-
-```php
-<?php
-
-namespace OCA\ImmoApp\Controller;
-
-use OCP\AppFramework\Controller;
+use OCP\AppFramework\ApiController;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\IRequest;
+use OCA\Immo\Service\PropertyService;
 use OCP\IL10N;
-use OCA\ImmoApp\Service\PropertyService;
-use OCA\ImmoApp\Service\UserRoleService;
-use OCP\AppFramework\Http;
 
-class PropertyController extends Controller {
+class PropertyController extends ApiController {
 
-	public function __construct(
-		string $appName,
-		IRequest $request,
-		private PropertyService $propertyService,
-		private UserRoleService $roleService,
-		private IL10N $l
-	) {
-		parent::__construct($appName, $request);
-	}
+    public function __construct(
+        string $appName,
+        IRequest $request,
+        private PropertyService $propertyService,
+        private IL10N $l10n
+    ) {
+        parent::__construct($appName, $request);
+    }
 
-	#[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-	public function index(): DataResponse {
-		$this->roleService->assertManager();
-		$properties = $this->propertyService->getAllForCurrentUser();
-		return new DataResponse($properties);
-	}
+    #[NoAdminRequired]
+    public function list(): DataResponse {
+        $uid = $this->request->getUser()->getUID();
+        $items = $this->propertyService->listByOwner($uid);
+        return new DataResponse($items);
+    }
 
-	#[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
-	public function create(string $name, ?string $street = null, ?string $zip = null,
-		?string $city = null, ?string $country = null, ?string $type = null,
-		?string $notes = null
-	): DataResponse {
-		$this->roleService->assertManager();
-
-		if ($name === '') {
-			return new DataResponse([
-				'message' => $this->l->t('Name is required'),
-				'field' => 'name',
-			], Http::STATUS_BAD_REQUEST);
-		}
-
-		$property = $this->propertyService->create([
-			'name' => $name,
-			'street' => $street,
-			'zip' => $zip,
-			'city' => $city,
-			'country' => $country,
-			'type' => $type,
-			'notes' => $notes,
-		]);
-
-		return new DataResponse($property, Http::STATUS_CREATED);
-	}
+    #[NoAdminRequired]
+    public function create(): DataResponse {
+        $uid = $this->request->getUser()->getUID();
+        $payload = $this->request->getParams();
+        if (empty($payload['name'])) {
+            throw new \OCP\AppFramework\Http\HttpException(
+                400,
+                $this->l10n->t('Name is required.')
+            );
+        }
+        $entity = $this->propertyService->create($uid, $payload);
+        return new DataResponse($entity, 201);
+    }
 }
 ```
 
-### Migration (Ausschnitt Properties)
-
-```php
-<?php
-
-namespace OCA\ImmoApp\Migration;
-
-use Closure;
-use OCP\DB\ISchemaWrapper;
-use OCP\Migration\SimpleMigrationStep;
-use OCP\Migration\IOutput;
-
-class Version0001Date20250101 extends SimpleMigrationStep {
-
-	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
-		/** @var ISchemaWrapper $schema */
-		$schema = $schemaClosure();
-
-		if (!$schema->hasTable('immo_properties')) {
-			$table = $schema->createTable('immo_properties');
-			$table->addColumn('id', 'integer', [
-				'autoincrement' => true,
-				'notnull' => true,
-				'unsigned' => true,
-			]);
-			$table->setPrimaryKey(['id']);
-
-			$table->addColumn('owner_uid', 'string', ['length' => 64, 'notnull' => true]);
-			$table->addColumn('name', 'string', ['length' => 255, 'notnull' => true]);
-			$table->addColumn('street', 'string', ['length' => 255, 'notnull' => false]);
-			$table->addColumn('zip', 'string', ['length' => 32, 'notnull' => false]);
-			$table->addColumn('city', 'string', ['length' => 255, 'notnull' => false]);
-			$table->addColumn('country', 'string', ['length' => 255, 'notnull' => false]);
-			$table->addColumn('type', 'string', ['length' => 64, 'notnull' => false]);
-			$table->addColumn('notes', 'text', ['notnull' => false]);
-			$table->addColumn('created_at', 'integer', ['notnull' => true, 'unsigned' => true]);
-			$table->addColumn('updated_at', 'integer', ['notnull' => true, 'unsigned' => true]);
-
-			$table->addIndex(['owner_uid'], 'immo_prop_owner_idx');
-		}
-
-		return $schema;
-	}
-}
-```
-
+---
