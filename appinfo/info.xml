@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<info>
+    <id>immo</id>
+    <name>Immo</name>
+    <summary>Property management for Nextcloud</summary>
+    <description>Manage properties, units, tenants and leases.</description>
+    <version>0.1.0</version>
+    <licence>agpl</licence>
+    <author>Immo App</author>
+    <namespace>Immo</namespace>
+    <category>productivity</category>
+    <bugs>https://example.com</bugs>
+    <dependencies>
+        <nextcloud min-version="32" max-version="32" />
+    </dependencies>
+    <navigations>
+        <navigation>
+            <name>Immo</name>
+            <route>immo.page.index</route>
+            <icon>icon.png</icon>
+        </navigation>
+    </navigations>
+</info>
