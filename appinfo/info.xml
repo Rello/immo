@@ -19,7 +19,7 @@
         <navigation>
             <name>Immo</name>
             <route>immo.page.index</route>
-            <icon>img/icon.svg</icon>
+            <icon>icon.svg</icon>
         </navigation>
     </navigations>
 </info>

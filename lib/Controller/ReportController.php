@@ -49,7 +49,7 @@ class ReportController extends Controller {
     }
 
     private function getBody(): array {
-        $data = json_decode($this->request->getContent(), true);
+        $data = $this->request->getParams();
         if (is_array($data)) {
             return $data;
         }

@@ -3,7 +3,7 @@
     'use strict';
 
     const baseUrl = OC.generateUrl('/apps/immo');
-    const escapeHtml = (value) => OC.Util.escapeHTML(value === null || value === undefined ? '' : String(value));
+    const escapeHtml = (value) => (value === null || value === undefined ? '' : String(value));
 
     const State = {
         currentView: null,
