@@ -6,13 +6,15 @@ use OCA\Immo\Db\PropertyMapper;
 use OCP\IUserSession;
 use OCP\AppFramework\Utility\ITimeFactory;
 use RuntimeException;
+use Psr\Log\LoggerInterface;
 
 class PropertyService {
     public function __construct(
         private PropertyMapper $mapper,
         private RoleService $roleService,
         private IUserSession $userSession,
-        private ?ITimeFactory $timeFactory = null
+        private ?ITimeFactory $timeFactory = null,
+		private LoggerInterface $logger,
     ) {
     }
 
@@ -31,7 +33,9 @@ class PropertyService {
     /** @return Property[] */
     public function list(): array {
         $uid = $this->requireManager();
-        return $this->mapper->findByOwner($uid);
+		$test = $this->mapper->findByOwner($uid);
+		//$this->logger->info(json_encode($test));
+        return $test;
     }
 
     public function get(int $id): Property {

@@ -58,7 +58,7 @@ class BookingService {
         $booking->setUnitId(isset($data['unitId']) ? (int)$data['unitId'] : null);
         $booking->setLeaseId(isset($data['leaseId']) ? (int)$data['leaseId'] : null);
         $booking->setYear((int)substr($booking->getDate(), 0, 4));
-        $booking->setIsYearly(!empty($data['isYearly']));
+        $booking->setIsYearly(true);
         $booking->setCreatedAt(time());
         $booking->setUpdatedAt(time());
         return $this->mapper->insert($booking);

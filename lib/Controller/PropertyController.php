@@ -5,7 +5,8 @@ use OCA\Immo\AppInfo\Application;
 use OCA\Immo\Service\PropertyService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\JSONResponse;
-use OCP\AppFramework\Http\Attributes\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\DataResponse;
 use OCP\IRequest;
 
 class PropertyController extends Controller {
@@ -45,7 +46,7 @@ class PropertyController extends Controller {
     }
 
     private function getBody(): array {
-        $data = json_decode($this->request->getContent(), true);
+        $data = $this->request->getParams();
         if (is_array($data)) {
             return $data;
         }

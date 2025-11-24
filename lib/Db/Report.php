@@ -1,69 +1,48 @@
 <?php
+
 namespace OCA\Immo\Db;
 
+use JsonSerializable;
 use OCP\AppFramework\Db\Entity;
 
-class Report extends Entity {
-    protected ?int $id = null;
-    protected int $propId = 0;
-    protected int $year = 0;
-    protected int $fileId = 0;
-    protected string $path = '';
-    protected int $createdAt = 0;
+/**
+ * @method int getId()
+ * @method void setId(int $id)
+ * @method int getPropId()
+ * @method void setPropId(int $propId)
+ * @method int getYear()
+ * @method void setYear(int $year)
+ * @method int getFileId()
+ * @method void setFileId(int $fileId)
+ * @method string getPath()
+ * @method void setPath(string $path)
+ * @method int getCreatedAt()
+ * @method void setCreatedAt(int $createdAt)
+ */
+class Report extends Entity implements JsonSerializable {
+	protected ?int $propId = null;
+	protected ?int $year = null;
+	protected ?int $fileId = null;
+	protected ?string $path = null;
+	protected ?int $createdAt = null;
 
-    public function __construct() {
-        $this->addType('id', 'integer');
-        $this->addType('propId', 'integer');
-        $this->addType('year', 'integer');
-        $this->addType('fileId', 'integer');
-        $this->addType('createdAt', 'integer');
-    }
+	public function __construct() {
+		$this->addType('id', 'integer');
+		$this->addType('propId', 'integer');
+		$this->addType('year', 'integer');
+		$this->addType('fileId', 'integer');
+		$this->addType('path', 'string');
+		$this->addType('createdAt', 'integer');
+	}
 
-    public function getId(): ?int {
-        return $this->id;
-    }
-
-    public function setId(?int $id): void {
-        $this->id = $id;
-    }
-
-    public function getPropId(): int {
-        return $this->propId;
-    }
-
-    public function setPropId(int $propId): void {
-        $this->propId = $propId;
-    }
-
-    public function getYear(): int {
-        return $this->year;
-    }
-
-    public function setYear(int $year): void {
-        $this->year = $year;
-    }
-
-    public function getFileId(): int {
-        return $this->fileId;
-    }
-
-    public function setFileId(int $fileId): void {
-        $this->fileId = $fileId;
-    }
-
-    public function getPath(): string {
-        return $this->path;
-    }
-
-    public function setPath(string $path): void {
-        $this->path = $path;
-    }
-
-    public function getCreatedAt(): int {
-        return $this->createdAt;
-    }
-
-    public function setCreatedAt(int $createdAt): void {
-        $this->createdAt = $createdAt;
-    }
+	public function jsonSerialize(): array {
+		return [
+			'id' => $this->id,
+			'propId' => $this->propId,
+			'year' => $this->year,
+			'fileId' => $this->fileId,
+			'path' => $this->path,
+			'createdAt' => $this->createdAt,
+		];
+	}
 }
