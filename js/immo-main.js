@@ -202,6 +202,137 @@
                 select.value = currentValue;
             }
         },
+        createModal(title) {
+            const backdrop = document.createElement('div');
+            backdrop.className = 'immo-modal-backdrop';
+            const modal = document.createElement('div');
+            modal.className = 'immo-modal';
+            modal.innerHTML = `
+                <div class="immo-modal-header">
+                    <h3>${escapeHtml(title)}</h3>
+                    <button type="button" class="immo-modal-close">×</button>
+                </div>
+                <div class="immo-modal-body"></div>`;
+            backdrop.appendChild(modal);
+            const titleEl = modal.querySelector('h3');
+            const bodyEl = modal.querySelector('.immo-modal-body');
+            const close = () => backdrop.remove();
+            modal.querySelector('.immo-modal-close').addEventListener('click', close);
+            backdrop.addEventListener('click', (ev) => {
+                if (ev.target === backdrop) {
+                    close();
+                }
+            });
+            return {
+                element: backdrop,
+                body: bodyEl,
+                open() {
+                    document.body.appendChild(backdrop);
+                },
+                close,
+                setTitle(newTitle) {
+                    titleEl.textContent = newTitle;
+                },
+                setContent(node) {
+                    bodyEl.innerHTML = '';
+                    bodyEl.appendChild(node);
+                },
+            };
+        },
+        renderTable(target, { columns, rows, state = {}, emptyMessage }) {
+            if (!rows || !rows.length) {
+                UI.showEmpty(target, emptyMessage || t('immo', 'No entries yet'));
+                return;
+            }
+            const sortableColumns = columns.filter(col => col.sortable !== false);
+            if (!state.sortKey && sortableColumns.length) {
+                state.sortKey = sortableColumns[0].id;
+            }
+            if (!state.sortDir) {
+                state.sortDir = 'asc';
+            }
+            const getComparable = (val) => {
+                if (val === null || val === undefined) {
+                    return '';
+                }
+                if (typeof val === 'number') {
+                    return val;
+                }
+                const num = Number(val);
+                return Number.isNaN(num) ? String(val).toLowerCase() : num;
+            };
+            const sortRows = () => {
+                const col = columns.find(c => c.id === state.sortKey) || columns[0];
+                if (!col || col.sortable === false) {
+                    return rows.slice();
+                }
+                const extractor = col.sortValue || ((row) => row[col.id]);
+                const sorted = rows.slice().sort((a, b) => {
+                    const va = getComparable(extractor(a));
+                    const vb = getComparable(extractor(b));
+                    if (va < vb) return state.sortDir === 'asc' ? -1 : 1;
+                    if (va > vb) return state.sortDir === 'asc' ? 1 : -1;
+                    return 0;
+                });
+                return sorted;
+            };
+            const performRender = () => {
+                const sortedRows = sortRows();
+                const table = document.createElement('table');
+                table.className = 'immo-table';
+                const thead = document.createElement('thead');
+                const headRow = document.createElement('tr');
+                columns.forEach(col => {
+                    const th = document.createElement('th');
+                    th.textContent = col.label;
+                    if (col.sortable !== false) {
+                        th.classList.add('sortable');
+                        th.dataset.sortKey = col.id;
+                        if (state.sortKey === col.id) {
+                            th.classList.add(state.sortDir === 'desc' ? 'sorted-desc' : 'sorted-asc');
+                        }
+                    }
+                    headRow.appendChild(th);
+                });
+                thead.appendChild(headRow);
+                table.appendChild(thead);
+                const tbody = document.createElement('tbody');
+                sortedRows.forEach(row => {
+                    const tr = document.createElement('tr');
+                    columns.forEach(col => {
+                        const td = document.createElement('td');
+                        if (col.render) {
+                            td.innerHTML = col.render(row);
+                        } else {
+                            td.textContent = escapeHtml(row[col.id] === undefined ? '' : row[col.id]);
+                        }
+                        if (col.className) {
+                            td.className = col.className;
+                        }
+                        tr.appendChild(td);
+                    });
+                    tbody.appendChild(tr);
+                });
+                table.appendChild(tbody);
+                target.innerHTML = '';
+                target.appendChild(table);
+                thead.addEventListener('click', (ev) => {
+                    const th = ev.target.closest('th[data-sort-key]');
+                    if (!th) {
+                        return;
+                    }
+                    const newKey = th.dataset.sortKey;
+                    if (state.sortKey === newKey) {
+                        state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        state.sortKey = newKey;
+                        state.sortDir = 'asc';
+                    }
+                    performRender();
+                });
+            };
+            performRender();
+        },
     };
 
     const Views = {};
@@ -260,11 +391,14 @@
         if (!listEl) {
             return;
         }
-        const formWrapper = document.createElement('div');
-        formWrapper.className = 'immo-panel';
-        formWrapper.innerHTML = `
-            <h3>${t('immo', 'Property form')}</h3>
-            <form class="immo-form immo-form-grid" id="immo-prop-form">
+        const state = { props: [], sort: { sortKey: 'name', sortDir: 'asc' } };
+
+        const openFormModal = (prop = null) => {
+            const isEdit = Boolean(prop);
+            const modal = UI.createModal(isEdit ? t('immo', 'Edit property') : t('immo', 'Create property'));
+            const form = document.createElement('form');
+            form.className = 'immo-form immo-form-grid';
+            form.innerHTML = `
                 <label class="wide">${t('immo', 'Name')}<input type="text" name="name" required></label>
                 <label>${t('immo', 'Street')}<input type="text" name="street"></label>
                 <label>${t('immo', 'ZIP')}<input type="text" name="zip"></label>
@@ -275,67 +409,54 @@
                 <div class="immo-form-actions">
                     <button type="submit" class="primary">${t('immo', 'Save')}</button>
                     <button type="button" data-action="cancel">${t('immo', 'Cancel')}</button>
-                </div>
-            </form>`;
-        listEl.parentNode.insertBefore(formWrapper, listEl);
-        const form = formWrapper.querySelector('form');
-        const cancelBtn = form.querySelector('[data-action="cancel"]');
-        const state = { editingId: null, props: [] };
-
-        const setModeCreate = () => {
-            state.editingId = null;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Create property');
-            UI.resetForm(form);
+                </div>`;
+            modal.setContent(form);
+            if (isEdit) {
+                modal.setTitle(t('immo', 'Edit property') + ' #' + prop.id);
+                UI.fillForm(form, prop);
+            }
+            form.addEventListener('submit', (ev) => {
+                ev.preventDefault();
+                const payload = UI.formToJSON(form);
+                const action = isEdit ? Api.updateProp(prop.id, payload) : Api.createProp(payload);
+                action.then(() => {
+                    UI.showSuccess(isEdit ? t('immo', 'Property updated') : t('immo', 'Property created'));
+                    modal.close();
+                    renderList();
+                }).catch(err => UI.showError(listEl, err.message));
+            });
+            form.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+            modal.open();
         };
-
-        const setModeEdit = (prop) => {
-            state.editingId = prop.id;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Edit property') + ' #' + prop.id;
-            UI.fillForm(form, prop);
-        };
-
-        form.addEventListener('submit', (ev) => {
-            ev.preventDefault();
-            const payload = UI.formToJSON(form);
-            const action = state.editingId ? Api.updateProp(state.editingId, payload) : Api.createProp(payload);
-            action.then(() => {
-                UI.showSuccess(state.editingId ? t('immo', 'Property updated') : t('immo', 'Property created'));
-                setModeCreate();
-                renderList();
-            }).catch(err => UI.showError(listEl, err.message));
-        });
-        cancelBtn.addEventListener('click', () => setModeCreate());
-        if (addBtn) {
-            addBtn.addEventListener('click', () => setModeCreate());
-        }
 
         const renderList = () => {
             UI.showLoading(listEl);
             Api.getProps().then(props => {
                 State.cache.props = props;
                 state.props = props;
-                if (!props.length) {
-                    UI.showEmpty(listEl, t('immo', 'No properties yet'));
-                    return;
-                }
-                let html = '<table class="immo-table"><thead><tr>' +
-                    '<th>' + t('immo', 'Name') + '</th>' +
-                    '<th>' + t('immo', 'Address') + '</th>' +
-                    '<th>' + t('immo', 'Type') + '</th>' +
-                    '<th></th></tr></thead><tbody>';
-                props.forEach(prop => {
-                    const addr = [prop.street, prop.zip, prop.city].filter(Boolean).join(', ');
-                    html += '<tr>' +
-                        '<td>' + escapeHtml(prop.name) + '</td>' +
-                        '<td>' + escapeHtml(addr) + '</td>' +
-                        '<td>' + escapeHtml(prop.type || '') + '</td>' +
-                        '<td class="immo-table-actions">' +
-                        '<button data-action="edit" data-id="' + prop.id + '">' + t('immo', 'Edit') + '</button>' +
-                        '<button data-action="delete" data-id="' + prop.id + '">' + t('immo', 'Delete') + '</button>' +
-                        '</td></tr>';
+                UI.renderTable(listEl, {
+                    columns: [
+                        { id: 'name', label: t('immo', 'Name') },
+                        {
+                            id: 'address',
+                            label: t('immo', 'Address'),
+                            render: (prop) => escapeHtml([prop.street, prop.zip, prop.city].filter(Boolean).join(', ')),
+                            sortValue: (prop) => [prop.street, prop.zip, prop.city].filter(Boolean).join(', '),
+                        },
+                        { id: 'type', label: t('immo', 'Type') },
+                        {
+                            id: 'actions',
+                            label: '',
+                            sortable: false,
+                            className: 'immo-table-actions',
+                            render: (prop) => '<button data-action="edit" data-id="' + prop.id + '">' + t('immo', 'Edit') + '</button>' +
+                                '<button data-action="delete" data-id="' + prop.id + '">' + t('immo', 'Delete') + '</button>',
+                        },
+                    ],
+                    rows: props,
+                    state: state.sort,
+                    emptyMessage: t('immo', 'No properties yet'),
                 });
-                html += '</tbody></table>';
-                listEl.innerHTML = html;
             }).catch(err => UI.showError(listEl, err.message));
         };
 
@@ -348,7 +469,7 @@
             if (btn.dataset.action === 'edit') {
                 const prop = state.props.find(p => p.id === id);
                 if (prop) {
-                    setModeEdit(prop);
+                    openFormModal(prop);
                 }
             } else if (btn.dataset.action === 'delete') {
                 UI.confirm(t('immo', 'Delete this property?')).then(ok => {
@@ -363,24 +484,30 @@
             }
         });
 
-        setModeCreate();
+        if (addBtn) {
+            addBtn.addEventListener('click', () => openFormModal());
+        }
         renderList();
     };
 
     Views.units = (root) => {
         const listEl = root.querySelector('#immo-unit-list');
+        const addBtn = root.querySelector('#immo-unit-add');
         if (!listEl) {
             return;
         }
-        const toolbar = document.createElement('div');
-        toolbar.className = 'immo-toolbar';
-        toolbar.innerHTML = `<button type="button" class="primary">${t('immo', 'New unit')}</button>`;
-        root.insertBefore(toolbar, listEl);
-        const formWrapper = document.createElement('div');
-        formWrapper.className = 'immo-panel';
-        formWrapper.innerHTML = `
-            <h3>${t('immo', 'Unit form')}</h3>
-            <form class="immo-form immo-form-grid">
+        const state = { editingId: null, props: [], units: [], sort: { sortKey: 'label', sortDir: 'asc' } };
+
+        const populateProps = (select) => {
+            UI.populateSelect(select, state.props, (prop) => ({ value: prop.id, label: `${prop.name} (${prop.city || ''})` }));
+        };
+
+        const openFormModal = (unit = null) => {
+            const isEdit = Boolean(unit);
+            const modal = UI.createModal(isEdit ? t('immo', 'Edit unit') : t('immo', 'Create unit'));
+            const form = document.createElement('form');
+            form.className = 'immo-form immo-form-grid';
+            form.innerHTML = `
                 <label>${t('immo', 'Property')}<select name="propId" required data-placeholder="${t('immo', 'Select property')}"></select></label>
                 <label>${t('immo', 'Label')}<input type="text" name="label" required></label>
                 <label>${t('immo', 'Location')}<input type="text" name="loc"></label>
@@ -392,31 +519,27 @@
                 <div class="immo-form-actions">
                     <button type="submit" class="primary">${t('immo', 'Save')}</button>
                     <button type="button" data-action="cancel">${t('immo', 'Cancel')}</button>
-                </div>
-            </form>`;
-        listEl.parentNode.insertBefore(formWrapper, listEl);
-        const form = formWrapper.querySelector('form');
-        const cancelBtn = form.querySelector('[data-action="cancel"]');
-        const addBtn = toolbar.querySelector('button');
-        const state = { editingId: null, props: [], units: [] };
-
-        const setModeCreate = () => {
-            state.editingId = null;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Create unit');
-            UI.resetForm(form);
-            if (state.props.length) {
+                </div>`;
+            modal.setContent(form);
+            populateProps(form.propId);
+            if (isEdit) {
+                modal.setTitle(t('immo', 'Edit unit') + ' #' + unit.id);
+                UI.fillForm(form, unit);
+            } else if (state.props.length) {
                 form.propId.value = String(state.props[0].id);
             }
-        };
-
-        const setModeEdit = (unit) => {
-            state.editingId = unit.id;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Edit unit') + ' #' + unit.id;
-            UI.fillForm(form, unit);
-        };
-
-        const populateProps = () => {
-            UI.populateSelect(form.propId, state.props, (prop) => ({ value: prop.id, label: `${prop.name} (${prop.city || ''})` }));
+            form.addEventListener('submit', (ev) => {
+                ev.preventDefault();
+                const payload = UI.formToJSON(form);
+                const req = isEdit ? Api.updateUnit(unit.id, payload) : Api.createUnit(payload);
+                req.then(() => {
+                    UI.showSuccess(isEdit ? t('immo', 'Unit updated') : t('immo', 'Unit created'));
+                    modal.close();
+                    renderList();
+                }).catch(err => UI.showError(listEl, err.message));
+            });
+            form.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+            modal.open();
         };
 
         const renderList = () => {
@@ -426,45 +549,32 @@
                 State.cache.units = units;
                 const propMap = {};
                 state.props.forEach(prop => { propMap[prop.id] = prop; });
-                if (!units.length) {
-                    UI.showEmpty(listEl, t('immo', 'No units yet'));
-                    return;
-                }
-                let html = '<table class="immo-table"><thead><tr>' +
-                    '<th>' + t('immo', 'Label') + '</th>' +
-                    '<th>' + t('immo', 'Property') + '</th>' +
-                    '<th>' + t('immo', 'Living area m²') + '</th>' +
-                    '<th>' + t('immo', 'Type') + '</th>' +
-                    '<th></th></tr></thead><tbody>';
-                units.forEach(unit => {
-                    const prop = propMap[unit.propId];
-                    html += '<tr>' +
-                        '<td>' + escapeHtml(unit.label) + '</td>' +
-                        '<td>' + escapeHtml(prop ? prop.name : ('#' + unit.propId)) + '</td>' +
-                        '<td>' + escapeHtml(unit.areaRes || '') + '</td>' +
-                        '<td>' + escapeHtml(unit.type || '') + '</td>' +
-                        '<td class="immo-table-actions">' +
-                        '<button data-action="edit" data-id="' + unit.id + '">' + t('immo', 'Edit') + '</button>' +
-                        '<button data-action="delete" data-id="' + unit.id + '">' + t('immo', 'Delete') + '</button>' +
-                        '</td></tr>';
+                UI.renderTable(listEl, {
+                    columns: [
+                        { id: 'label', label: t('immo', 'Label') },
+                        {
+                            id: 'property',
+                            label: t('immo', 'Property'),
+                            render: (unit) => escapeHtml(propMap[unit.propId] ? propMap[unit.propId].name : ('#' + unit.propId)),
+                            sortValue: (unit) => propMap[unit.propId] ? propMap[unit.propId].name : unit.propId,
+                        },
+                        { id: 'areaRes', label: t('immo', 'Living area m²') },
+                        { id: 'type', label: t('immo', 'Type') },
+                        {
+                            id: 'actions',
+                            label: '',
+                            sortable: false,
+                            className: 'immo-table-actions',
+                            render: (unit) => '<button data-action="edit" data-id="' + unit.id + '">' + t('immo', 'Edit') + '</button>' +
+                                '<button data-action="delete" data-id="' + unit.id + '">' + t('immo', 'Delete') + '</button>',
+                        },
+                    ],
+                    rows: units,
+                    state: state.sort,
+                    emptyMessage: t('immo', 'No units yet'),
                 });
-                html += '</tbody></table>';
-                listEl.innerHTML = html;
             }).catch(err => UI.showError(listEl, err.message));
         };
-
-        form.addEventListener('submit', (ev) => {
-            ev.preventDefault();
-            const payload = UI.formToJSON(form);
-            const requestFn = state.editingId ? Api.updateUnit(state.editingId, payload) : Api.createUnit(payload);
-            requestFn.then(() => {
-                UI.showSuccess(state.editingId ? t('immo', 'Unit updated') : t('immo', 'Unit created'));
-                setModeCreate();
-                renderList();
-            }).catch(err => UI.showError(listEl, err.message));
-        });
-        cancelBtn.addEventListener('click', () => setModeCreate());
-        addBtn.addEventListener('click', () => setModeCreate());
 
         listEl.addEventListener('click', (ev) => {
             const btn = ev.target.closest('button[data-action]');
@@ -475,7 +585,7 @@
             if (btn.dataset.action === 'edit') {
                 const unit = state.units.find(u => u.id === id);
                 if (unit) {
-                    setModeEdit(unit);
+                    openFormModal(unit);
                 }
             } else if (btn.dataset.action === 'delete') {
                 UI.confirm(t('immo', 'Delete this unit?')).then(ok => {
@@ -492,25 +602,30 @@
 
         Api.getProps().then(props => {
             state.props = props;
-            populateProps();
         }).catch(() => {
             state.props = [];
         }).finally(() => {
-            setModeCreate();
             renderList();
         });
+        if (addBtn) {
+            addBtn.addEventListener('click', () => openFormModal());
+        }
     };
 
     Views.tenants = (root) => {
         const listEl = root.querySelector('#immo-tenant-list');
+        const addBtn = root.querySelector('#immo-tenant-add');
         if (!listEl) {
             return;
         }
-        const formWrapper = document.createElement('div');
-        formWrapper.className = 'immo-panel';
-        formWrapper.innerHTML = `
-            <h3>${t('immo', 'Tenant form')}</h3>
-            <form class="immo-form immo-form-grid">
+        const state = { tenants: [], sort: { sortKey: 'name', sortDir: 'asc' } };
+
+        const openFormModal = (tenant = null) => {
+            const isEdit = Boolean(tenant);
+            const modal = UI.createModal(isEdit ? t('immo', 'Edit tenant') : t('immo', 'Create tenant'));
+            const form = document.createElement('form');
+            form.className = 'immo-form immo-form-grid';
+            form.innerHTML = `
                 <label>${t('immo', 'Name')}<input type="text" name="name" required></label>
                 <label>${t('immo', 'Customer number')}<input type="text" name="custNo"></label>
                 <label>${t('immo', 'Email')}<input type="email" name="email"></label>
@@ -520,23 +635,24 @@
                 <div class="immo-form-actions">
                     <button type="submit" class="primary">${t('immo', 'Save')}</button>
                     <button type="button" data-action="cancel">${t('immo', 'Cancel')}</button>
-                </div>
-            </form>`;
-        listEl.parentNode.insertBefore(formWrapper, listEl);
-        const form = formWrapper.querySelector('form');
-        const cancelBtn = form.querySelector('[data-action="cancel"]');
-        const state = { editingId: null, tenants: [] };
-
-        const setModeCreate = () => {
-            state.editingId = null;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Create tenant');
-            UI.resetForm(form);
-        };
-
-        const setModeEdit = (tenant) => {
-            state.editingId = tenant.id;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Edit tenant') + ' #' + tenant.id;
-            UI.fillForm(form, tenant);
+                </div>`;
+            modal.setContent(form);
+            if (isEdit) {
+                modal.setTitle(t('immo', 'Edit tenant') + ' #' + tenant.id);
+                UI.fillForm(form, tenant);
+            }
+            form.addEventListener('submit', (ev) => {
+                ev.preventDefault();
+                const payload = UI.formToJSON(form);
+                const fn = isEdit ? Api.updateTenant(tenant.id, payload) : Api.createTenant(payload);
+                fn.then(() => {
+                    UI.showSuccess(isEdit ? t('immo', 'Tenant updated') : t('immo', 'Tenant created'));
+                    modal.close();
+                    renderList();
+                }).catch(err => UI.showError(listEl, err.message));
+            });
+            form.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+            modal.open();
         };
 
         const renderList = () => {
@@ -544,42 +660,31 @@
             Api.getTenants().then(tenants => {
                 state.tenants = tenants;
                 State.cache.tenants = tenants;
-                if (!tenants.length) {
-                    UI.showEmpty(listEl, t('immo', 'No tenants yet'));
-                    return;
-                }
-                let html = '<table class="immo-table"><thead><tr>' +
-                    '<th>' + t('immo', 'Name') + '</th>' +
-                    '<th>' + t('immo', 'Contact') + '</th>' +
-                    '<th>' + t('immo', 'Customer number') + '</th>' +
-                    '<th></th></tr></thead><tbody>';
-                tenants.forEach(tenant => {
-                    const contact = [tenant.email, tenant.phone].filter(Boolean).join(' · ');
-                    html += '<tr>' +
-                        '<td>' + escapeHtml(tenant.name) + '</td>' +
-                        '<td>' + escapeHtml(contact) + '</td>' +
-                        '<td>' + escapeHtml(tenant.custNo || '') + '</td>' +
-                        '<td class="immo-table-actions">' +
-                        '<button data-action="edit" data-id="' + tenant.id + '">' + t('immo', 'Edit') + '</button>' +
-                        '<button data-action="delete" data-id="' + tenant.id + '">' + t('immo', 'Delete') + '</button>' +
-                        '</td></tr>';
+                UI.renderTable(listEl, {
+                    columns: [
+                        { id: 'name', label: t('immo', 'Name') },
+                        {
+                            id: 'contact',
+                            label: t('immo', 'Contact'),
+                            render: (tenant) => escapeHtml([tenant.email, tenant.phone].filter(Boolean).join(' · ')),
+                            sortValue: (tenant) => [tenant.email, tenant.phone].filter(Boolean).join(' '),
+                        },
+                        { id: 'custNo', label: t('immo', 'Customer number') },
+                        {
+                            id: 'actions',
+                            label: '',
+                            sortable: false,
+                            className: 'immo-table-actions',
+                            render: (tenant) => '<button data-action="edit" data-id="' + tenant.id + '">' + t('immo', 'Edit') + '</button>' +
+                                '<button data-action="delete" data-id="' + tenant.id + '">' + t('immo', 'Delete') + '</button>',
+                        },
+                    ],
+                    rows: tenants,
+                    state: state.sort,
+                    emptyMessage: t('immo', 'No tenants yet'),
                 });
-                html += '</tbody></table>';
-                listEl.innerHTML = html;
             }).catch(err => UI.showError(listEl, err.message));
         };
-
-        form.addEventListener('submit', (ev) => {
-            ev.preventDefault();
-            const payload = UI.formToJSON(form);
-            const fn = state.editingId ? Api.updateTenant(state.editingId, payload) : Api.createTenant(payload);
-            fn.then(() => {
-                UI.showSuccess(state.editingId ? t('immo', 'Tenant updated') : t('immo', 'Tenant created'));
-                setModeCreate();
-                renderList();
-            }).catch(err => UI.showError(listEl, err.message));
-        });
-        cancelBtn.addEventListener('click', () => setModeCreate());
 
         listEl.addEventListener('click', (ev) => {
             const btn = ev.target.closest('button[data-action]');
@@ -590,7 +695,7 @@
             if (btn.dataset.action === 'edit') {
                 const tenant = state.tenants.find(tn => tn.id === id);
                 if (tenant) {
-                    setModeEdit(tenant);
+                    openFormModal(tenant);
                 }
             } else if (btn.dataset.action === 'delete') {
                 UI.confirm(t('immo', 'Delete this tenant?')).then(ok => {
@@ -605,12 +710,15 @@
             }
         });
 
-        setModeCreate();
+        if (addBtn) {
+            addBtn.addEventListener('click', () => openFormModal());
+        }
         renderList();
     };
 
     Views.leases = (root) => {
         const listEl = root.querySelector('#immo-lease-list');
+        const addBtn = root.querySelector('#immo-lease-add');
         if (!listEl) {
             return;
         }
@@ -627,11 +735,22 @@
             <button type="submit" class="primary">${t('immo', 'Filter')}</button>`;
         root.insertBefore(filterBar, listEl);
 
-        const formWrapper = document.createElement('div');
-        formWrapper.className = 'immo-panel';
-        formWrapper.innerHTML = `
-            <h3>${t('immo', 'Lease form')}</h3>
-            <form class="immo-form immo-form-grid">
+        const state = { editingId: null, leases: [], units: [], tenants: [], sort: { sortKey: 'start', sortDir: 'asc' } };
+
+        const populateRefs = (form) => {
+            UI.populateSelect(form.unitId, state.units, (unit) => {
+                const unitLabel = unit.label ? unit.label : '#' + unit.id;
+                return { value: unit.id, label: `${unitLabel} (#${unit.id})` };
+            });
+            UI.populateSelect(form.tenantId, state.tenants, (tenant) => ({ value: tenant.id, label: tenant.name }));
+        };
+
+        const openFormModal = (lease = null) => {
+            const isEdit = Boolean(lease);
+            const modal = UI.createModal(isEdit ? t('immo', 'Edit lease') : t('immo', 'Create lease'));
+            const form = document.createElement('form');
+            form.className = 'immo-form immo-form-grid';
+            form.innerHTML = `
                 <label>${t('immo', 'Unit')}<select name="unitId" required data-placeholder="${t('immo', 'Select unit')}"></select></label>
                 <label>${t('immo', 'Tenant')}<select name="tenantId" required data-placeholder="${t('immo', 'Select tenant')}"></select></label>
                 <label>${t('immo', 'Start')}<input type="date" name="start" required></label>
@@ -644,33 +763,28 @@
                 <div class="immo-form-actions">
                     <button type="submit" class="primary">${t('immo', 'Save')}</button>
                     <button type="button" data-action="cancel">${t('immo', 'Cancel')}</button>
-                </div>
-            </form>`;
-        listEl.parentNode.insertBefore(formWrapper, listEl);
-        const form = formWrapper.querySelector('form');
-        const cancelBtn = form.querySelector('[data-action="cancel"]');
-        const state = { editingId: null, leases: [], units: [], tenants: [] };
-
-        const setModeCreate = () => {
-            state.editingId = null;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Create lease');
-            UI.resetForm(form);
-            const today = new Date().toISOString().slice(0, 10);
-            form.start.value = today;
-        };
-
-        const setModeEdit = (lease) => {
-            state.editingId = lease.id;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Edit lease') + ' #' + lease.id;
-            UI.fillForm(form, lease);
-        };
-
-        const populateRefs = () => {
-            UI.populateSelect(form.unitId, state.units, (unit) => {
-                const unitLabel = unit.label ? unit.label : '#' + unit.id;
-                return { value: unit.id, label: `${unitLabel} (#${unit.id})` };
+                </div>`;
+            modal.setContent(form);
+            populateRefs(form);
+            if (isEdit) {
+                modal.setTitle(t('immo', 'Edit lease') + ' #' + lease.id);
+                UI.fillForm(form, lease);
+            } else {
+                const today = new Date().toISOString().slice(0, 10);
+                form.start.value = today;
+            }
+            form.addEventListener('submit', (ev) => {
+                ev.preventDefault();
+                const payload = UI.formToJSON(form);
+                const action = isEdit ? Api.updateLease(lease.id, payload) : Api.createLease(payload);
+                action.then(() => {
+                    UI.showSuccess(isEdit ? t('immo', 'Lease updated') : t('immo', 'Lease created'));
+                    modal.close();
+                    renderList();
+                }).catch(err => UI.showError(listEl, err.message));
             });
-            UI.populateSelect(form.tenantId, state.tenants, (tenant) => ({ value: tenant.id, label: tenant.name }));
+            form.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+            modal.open();
         };
 
         const renderList = () => {
@@ -682,52 +796,52 @@
             Api.getLeases(filter).then(leases => {
                 state.leases = leases;
                 State.cache.leases = leases;
-                if (!leases.length) {
-                    UI.showEmpty(listEl, t('immo', 'No leases yet'));
-                    return;
-                }
                 const unitMap = {};
                 state.units.forEach(unit => { unitMap[unit.id] = unit; });
                 const tenantMap = {};
                 state.tenants.forEach(tenant => { tenantMap[tenant.id] = tenant; });
-                let html = '<table class="immo-table"><thead><tr>' +
-                    '<th>' + t('immo', 'Tenant') + '</th>' +
-                    '<th>' + t('immo', 'Unit') + '</th>' +
-                    '<th>' + t('immo', 'Period') + '</th>' +
-                    '<th>' + t('immo', 'Cold rent') + '</th>' +
-                    '<th>' + t('immo', 'Status') + '</th>' +
-                    '<th></th></tr></thead><tbody>';
-                leases.forEach(lease => {
-                    const tenant = tenantMap[lease.tenantId];
-                    const unit = unitMap[lease.unitId];
-                    const period = [lease.start, lease.end || '…'].filter(Boolean).join(' – ');
-                    html += '<tr>' +
-                        '<td>' + escapeHtml(tenant ? tenant.name : ('#' + lease.tenantId)) + '</td>' +
-                        '<td>' + escapeHtml(unit ? unit.label : ('#' + lease.unitId)) + '</td>' +
-                        '<td>' + escapeHtml(period) + '</td>' +
-                        '<td>' + escapeHtml(lease.rentCold || '') + '</td>' +
-                        '<td><span class="immo-tag">' + escapeHtml(lease.status) + '</span></td>' +
-                        '<td class="immo-table-actions">' +
-                        '<button data-action="edit" data-id="' + lease.id + '">' + t('immo', 'Edit') + '</button>' +
-                        '<button data-action="delete" data-id="' + lease.id + '">' + t('immo', 'Delete') + '</button>' +
-                        '</td></tr>';
+                UI.renderTable(listEl, {
+                    columns: [
+                        {
+                            id: 'tenant',
+                            label: t('immo', 'Tenant'),
+                            render: (lease) => escapeHtml(tenantMap[lease.tenantId] ? tenantMap[lease.tenantId].name : ('#' + lease.tenantId)),
+                            sortValue: (lease) => tenantMap[lease.tenantId] ? tenantMap[lease.tenantId].name : lease.tenantId,
+                        },
+                        {
+                            id: 'unit',
+                            label: t('immo', 'Unit'),
+                            render: (lease) => escapeHtml(unitMap[lease.unitId] ? unitMap[lease.unitId].label : ('#' + lease.unitId)),
+                            sortValue: (lease) => unitMap[lease.unitId] ? unitMap[lease.unitId].label : lease.unitId,
+                        },
+                        {
+                            id: 'period',
+                            label: t('immo', 'Period'),
+                            render: (lease) => escapeHtml([lease.start, lease.end || '…'].filter(Boolean).join(' – ')),
+                            sortValue: (lease) => lease.start,
+                        },
+                        { id: 'rentCold', label: t('immo', 'Cold rent') },
+                        {
+                            id: 'status',
+                            label: t('immo', 'Status'),
+                            render: (lease) => '<span class="immo-tag">' + escapeHtml(lease.status) + '</span>',
+                        },
+                        {
+                            id: 'actions',
+                            label: '',
+                            sortable: false,
+                            className: 'immo-table-actions',
+                            render: (lease) => '<button data-action="edit" data-id="' + lease.id + '">' + t('immo', 'Edit') + '</button>' +
+                                '<button data-action="delete" data-id="' + lease.id + '">' + t('immo', 'Delete') + '</button>',
+                        },
+                    ],
+                    rows: leases,
+                    state: state.sort,
+                    emptyMessage: t('immo', 'No leases yet'),
                 });
-                html += '</tbody></table>';
-                listEl.innerHTML = html;
             }).catch(err => UI.showError(listEl, err.message));
         };
 
-        form.addEventListener('submit', (ev) => {
-            ev.preventDefault();
-            const payload = UI.formToJSON(form);
-            const fn = state.editingId ? Api.updateLease(state.editingId, payload) : Api.createLease(payload);
-            fn.then(() => {
-                UI.showSuccess(state.editingId ? t('immo', 'Lease updated') : t('immo', 'Lease created'));
-                setModeCreate();
-                renderList();
-            }).catch(err => UI.showError(listEl, err.message));
-        });
-        cancelBtn.addEventListener('click', () => setModeCreate());
         filterBar.addEventListener('submit', (ev) => {
             ev.preventDefault();
             renderList();
@@ -742,7 +856,7 @@
             if (btn.dataset.action === 'edit') {
                 const lease = state.leases.find(l => l.id === id);
                 if (lease) {
-                    setModeEdit(lease);
+                    openFormModal(lease);
                 }
             } else if (btn.dataset.action === 'delete') {
                 UI.confirm(t('immo', 'Delete this lease?')).then(ok => {
@@ -760,14 +874,15 @@
         Promise.all([Api.getUnits(), Api.getTenants()]).then(([units, tenants]) => {
             state.units = units;
             state.tenants = tenants;
-            populateRefs();
             renderList();
         }).catch(err => UI.showError(listEl, err.message));
-        setModeCreate();
+        if (addBtn) {
+            addBtn.addEventListener('click', () => openFormModal());
+        }
     };
-
     Views.books = (root) => {
         const listEl = root.querySelector('#immo-booking-list');
+        const addBtn = root.querySelector('#immo-booking-add');
         if (!listEl) {
             return;
         }
@@ -784,11 +899,20 @@
             <button type="submit" class="primary">${t('immo', 'Filter')}</button>`;
         root.insertBefore(filterBar, listEl);
 
-        const formWrapper = document.createElement('div');
-        formWrapper.className = 'immo-panel';
-        formWrapper.innerHTML = `
-            <h3>${t('immo', 'Booking form')}</h3>
-            <form class="immo-form immo-form-grid">
+        const state = { editingId: null, bookings: [], props: [], units: [], leases: [], sort: { sortKey: 'date', sortDir: 'desc' } };
+
+        const populateRefs = (form) => {
+            UI.populateSelect(form.propId, state.props, (prop) => ({ value: prop.id, label: prop.name }));
+            UI.populateSelect(form.unitId, state.units, (unit) => ({ value: unit.id, label: unit.label || ('#' + unit.id) }));
+            UI.populateSelect(form.leaseId, state.leases, (lease) => ({ value: lease.id, label: `${lease.id} · ${lease.start}` }));
+        };
+
+        const openFormModal = (booking = null) => {
+            const isEdit = Boolean(booking);
+            const modal = UI.createModal(isEdit ? t('immo', 'Edit booking') : t('immo', 'Create booking'));
+            const form = document.createElement('form');
+            form.className = 'immo-form immo-form-grid';
+            form.innerHTML = `
                 <label>${t('immo', 'Type')}<select name="type">
                     <option value="in">${t('immo', 'Income')}</option>
                     <option value="out">${t('immo', 'Expense')}</option>
@@ -804,31 +928,28 @@
                 <div class="immo-form-actions">
                     <button type="submit" class="primary">${t('immo', 'Save')}</button>
                     <button type="button" data-action="cancel">${t('immo', 'Cancel')}</button>
-                </div>
-            </form>`;
-        listEl.parentNode.insertBefore(formWrapper, listEl);
-        const form = formWrapper.querySelector('form');
-        const cancelBtn = form.querySelector('[data-action="cancel"]');
-        const state = { editingId: null, bookings: [], props: [], units: [], leases: [] };
-
-        const populateRefs = () => {
-            UI.populateSelect(form.propId, state.props, (prop) => ({ value: prop.id, label: prop.name }));
-            UI.populateSelect(form.unitId, state.units, (unit) => ({ value: unit.id, label: unit.label || ('#' + unit.id) }));
-            UI.populateSelect(form.leaseId, state.leases, (lease) => ({ value: lease.id, label: `${lease.id} · ${lease.start}` }));
-        };
-
-        const setModeCreate = () => {
-            state.editingId = null;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Create booking');
-            UI.resetForm(form);
-            form.date.value = new Date().toISOString().slice(0, 10);
-            form.type.value = 'in';
-        };
-
-        const setModeEdit = (booking) => {
-            state.editingId = booking.id;
-            formWrapper.querySelector('h3').textContent = t('immo', 'Edit booking') + ' #' + booking.id;
-            UI.fillForm(form, booking);
+                </div>`;
+            modal.setContent(form);
+            populateRefs(form);
+            if (isEdit) {
+                modal.setTitle(t('immo', 'Edit booking') + ' #' + booking.id);
+                UI.fillForm(form, booking);
+            } else {
+                form.date.value = new Date().toISOString().slice(0, 10);
+                form.type.value = 'in';
+            }
+            form.addEventListener('submit', (ev) => {
+                ev.preventDefault();
+                const payload = UI.formToJSON(form);
+                const fn = isEdit ? Api.updateBooking(booking.id, payload) : Api.createBooking(payload);
+                fn.then(() => {
+                    UI.showSuccess(isEdit ? t('immo', 'Booking updated') : t('immo', 'Booking created'));
+                    modal.close();
+                    renderList();
+                }).catch(err => UI.showError(listEl, err.message));
+            });
+            form.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+            modal.open();
         };
 
         const renderList = () => {
@@ -840,45 +961,40 @@
             Api.getBookings(filter).then(bookings => {
                 state.bookings = bookings;
                 State.cache.bookings = bookings;
-                if (!bookings.length) {
-                    UI.showEmpty(listEl, t('immo', 'No bookings yet'));
-                    return;
-                }
                 const propMap = {};
                 state.props.forEach(prop => { propMap[prop.id] = prop; });
-                let html = '<table class="immo-table"><thead><tr>' +
-                    '<th>' + t('immo', 'Date') + '</th>' +
-                    '<th>' + t('immo', 'Category') + '</th>' +
-                    '<th>' + t('immo', 'Amount') + '</th>' +
-                    '<th>' + t('immo', 'Property') + '</th>' +
-                    '<th></th></tr></thead><tbody>';
-                bookings.forEach(booking => {
-                    html += '<tr>' +
-                        '<td>' + escapeHtml(booking.date) + '</td>' +
-                        '<td>' + escapeHtml(booking.type + ' · ' + (booking.cat || '')) + '</td>' +
-                        '<td>' + escapeHtml(booking.amt) + '</td>' +
-                        '<td>' + escapeHtml(propMap[booking.propId] ? propMap[booking.propId].name : ('#' + booking.propId)) + '</td>' +
-                        '<td class="immo-table-actions">' +
-                        '<button data-action="edit" data-id="' + booking.id + '">' + t('immo', 'Edit') + '</button>' +
-                        '<button data-action="delete" data-id="' + booking.id + '">' + t('immo', 'Delete') + '</button>' +
-                        '</td></tr>';
+                UI.renderTable(listEl, {
+                    columns: [
+                        { id: 'date', label: t('immo', 'Date') },
+                        {
+                            id: 'category',
+                            label: t('immo', 'Category'),
+                            render: (booking) => escapeHtml(booking.type + ' · ' + (booking.cat || '')),
+                            sortValue: (booking) => booking.cat || booking.type,
+                        },
+                        { id: 'amt', label: t('immo', 'Amount') },
+                        {
+                            id: 'property',
+                            label: t('immo', 'Property'),
+                            render: (booking) => escapeHtml(propMap[booking.propId] ? propMap[booking.propId].name : ('#' + booking.propId)),
+                            sortValue: (booking) => propMap[booking.propId] ? propMap[booking.propId].name : booking.propId,
+                        },
+                        {
+                            id: 'actions',
+                            label: '',
+                            sortable: false,
+                            className: 'immo-table-actions',
+                            render: (booking) => '<button data-action="edit" data-id="' + booking.id + '">' + t('immo', 'Edit') + '</button>' +
+                                '<button data-action="delete" data-id="' + booking.id + '">' + t('immo', 'Delete') + '</button>',
+                        },
+                    ],
+                    rows: bookings,
+                    state: state.sort,
+                    emptyMessage: t('immo', 'No bookings yet'),
                 });
-                html += '</tbody></table>';
-                listEl.innerHTML = html;
             }).catch(err => UI.showError(listEl, err.message));
         };
 
-        form.addEventListener('submit', (ev) => {
-            ev.preventDefault();
-            const payload = UI.formToJSON(form);
-            const fn = state.editingId ? Api.updateBooking(state.editingId, payload) : Api.createBooking(payload);
-            fn.then(() => {
-                UI.showSuccess(state.editingId ? t('immo', 'Booking updated') : t('immo', 'Booking created'));
-                setModeCreate();
-                renderList();
-            }).catch(err => UI.showError(listEl, err.message));
-        });
-        cancelBtn.addEventListener('click', () => setModeCreate());
         filterBar.addEventListener('submit', (ev) => {
             ev.preventDefault();
             renderList();
@@ -893,7 +1009,7 @@
             if (btn.dataset.action === 'edit') {
                 const booking = state.bookings.find(b => b.id === id);
                 if (booking) {
-                    setModeEdit(booking);
+                    openFormModal(booking);
                 }
             } else if (btn.dataset.action === 'delete') {
                 UI.confirm(t('immo', 'Delete this booking?')).then(ok => {
@@ -908,20 +1024,20 @@
             }
         });
 
-        setModeCreate();
         Promise.all([Api.getProps(), Api.getUnits(), Api.getLeases()]).then(([props, units, leases]) => {
             state.props = props;
             state.units = units;
             state.leases = leases;
-            populateRefs();
             renderList();
         }).catch(err => UI.showError(listEl, err.message));
+        if (addBtn) {
+            addBtn.addEventListener('click', () => openFormModal());
+        }
     };
-
     Views.reports = (root) => {
         const listEl = root.querySelector('#immo-report-list');
-        const createForm = root.querySelector('#immo-report-create');
-        if (!listEl || !createForm) {
+        const addBtn = root.querySelector('#immo-report-add');
+        if (!listEl) {
             return;
         }
         const filterForm = document.createElement('form');
@@ -932,11 +1048,36 @@
             <button type="submit" class="primary">${t('immo', 'Filter')}</button>`;
         listEl.parentNode.insertBefore(filterForm, listEl);
 
-        const state = { reports: [], props: [] };
+        const state = { reports: [], props: [], sort: { sortKey: 'year', sortDir: 'desc' } };
 
-        const populateProps = () => {
-            UI.populateSelect(filterForm.propId, state.props, (prop) => ({ value: prop.id, label: prop.name }));
-            UI.populateSelect(createForm.propId, state.props, (prop) => ({ value: prop.id, label: prop.name }));
+        const populateProps = (select) => {
+            UI.populateSelect(select, state.props, (prop) => ({ value: prop.id, label: prop.name }));
+        };
+
+        const openFormModal = () => {
+            const modal = UI.createModal(t('immo', 'Create report'));
+            const form = document.createElement('form');
+            form.className = 'immo-form immo-form-grid';
+            form.innerHTML = `
+                <label>${t('immo', 'Property')}<select name="propId" required data-placeholder="${t('immo', 'Select property')}"></select></label>
+                <label>${t('immo', 'Year')}<input type="number" name="year" value="${escapeHtml(new Date().getFullYear())}"></label>
+                <div class="immo-form-actions">
+                    <button class="primary" type="submit">${t('immo', 'Create report')}</button>
+                    <button type="button" data-action="cancel">${t('immo', 'Cancel')}</button>
+                </div>`;
+            modal.setContent(form);
+            populateProps(form.propId);
+            form.addEventListener('submit', (ev) => {
+                ev.preventDefault();
+                const payload = UI.formToJSON(form);
+                Api.createReport(payload).then(() => {
+                    UI.showSuccess(t('immo', 'Report created'));
+                    modal.close();
+                    renderList();
+                }).catch(err => UI.showError(listEl, err.message));
+            });
+            form.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+            modal.open();
         };
 
         const renderList = () => {
@@ -948,37 +1089,26 @@
             Api.getReports(filter).then(reports => {
                 state.reports = reports;
                 State.cache.reports = reports;
-                if (!reports.length) {
-                    UI.showEmpty(listEl, t('immo', 'No reports yet'));
-                    return;
-                }
                 const propMap = {};
                 state.props.forEach(prop => { propMap[prop.id] = prop; });
-                let html = '<table class="immo-table"><thead><tr>' +
-                    '<th>' + t('immo', 'Property') + '</th>' +
-                    '<th>' + t('immo', 'Year') + '</th>' +
-                    '<th>' + t('immo', 'File path') + '</th>' +
-                    '</tr></thead><tbody>';
-                reports.forEach(report => {
-                    html += '<tr>' +
-                        '<td>' + escapeHtml(propMap[report.propId] ? propMap[report.propId].name : ('#' + report.propId)) + '</td>' +
-                        '<td>' + escapeHtml(report.year) + '</td>' +
-                        '<td>' + escapeHtml(report.path) + '</td>' +
-                        '</tr>';
+                UI.renderTable(listEl, {
+                    columns: [
+                        {
+                            id: 'property',
+                            label: t('immo', 'Property'),
+                            render: (report) => escapeHtml(propMap[report.propId] ? propMap[report.propId].name : ('#' + report.propId)),
+                            sortValue: (report) => propMap[report.propId] ? propMap[report.propId].name : report.propId,
+                        },
+                        { id: 'year', label: t('immo', 'Year') },
+                        { id: 'path', label: t('immo', 'File path') },
+                    ],
+                    rows: reports,
+                    state: state.sort,
+                    emptyMessage: t('immo', 'No reports yet'),
                 });
-                html += '</tbody></table>';
-                listEl.innerHTML = html;
             }).catch(err => UI.showError(listEl, err.message));
         };
 
-        createForm.addEventListener('submit', (ev) => {
-            ev.preventDefault();
-            const payload = UI.formToJSON(createForm);
-            Api.createReport(payload).then(() => {
-                UI.showSuccess(t('immo', 'Report created'));
-                renderList();
-            }).catch(err => UI.showError(listEl, err.message));
-        });
         filterForm.addEventListener('submit', (ev) => {
             ev.preventDefault();
             renderList();
@@ -986,11 +1116,16 @@
 
         Api.getProps().then(props => {
             state.props = props;
-            populateProps();
+            populateProps(filterForm.propId);
             renderList();
         }).catch(err => UI.showError(listEl, err.message));
+
+        if (addBtn) {
+            addBtn.addEventListener('click', () => openFormModal());
+        }
     };
 
+    const Navigation = {
     const Navigation = {
         links: {},
         init() {
