@@ -32,6 +32,103 @@ window.Immo = window.Immo || {};
         };
     })();
 
+    Immo.UI = (() => {
+        const openModal = (id) => {
+            const modal = document.getElementById(id);
+            modal && modal.classList.add('open');
+        };
+
+        const closeModal = (id) => {
+            const modal = document.getElementById(id);
+            modal && modal.classList.remove('open');
+        };
+
+        const attachCloseHandlers = () => {
+            document.body.addEventListener('click', (e) => {
+                const closeId = e.target.dataset.closeModal;
+                if (closeId) {
+                    closeModal(closeId);
+                }
+            });
+        };
+
+        const Table = (() => {
+            const sortRows = (rows, sortState) => {
+                if (!sortState || !sortState.key) return rows;
+                const sorted = [...rows];
+                sorted.sort((a, b) => {
+                    const av = a[sortState.key] ?? '';
+                    const bv = b[sortState.key] ?? '';
+                    if (typeof av === 'number' && typeof bv === 'number') {
+                        return sortState.dir === 'asc' ? av - bv : bv - av;
+                    }
+                    return sortState.dir === 'asc'
+                        ? String(av).localeCompare(String(bv))
+                        : String(bv).localeCompare(String(av));
+                });
+                return sorted;
+            };
+
+            const render = (container, columns, rows, sortState, onSort) => {
+                const target = typeof container === 'string' ? document.getElementById(container) : container;
+                if (!target) return;
+                const header = columns.map(col => {
+                    const active = sortState && sortState.key === col.key;
+                    const indicator = col.sortable === false ? '' : `<span class="sort-indicator">${active ? (sortState.dir === 'asc' ? '↑' : '↓') : '⇅'}</span>`;
+                    const sortableAttr = col.sortable === false ? '' : `data-sort-key="${col.key}"`;
+                    return `<th ${sortableAttr}>${col.label}${indicator}</th>`;
+                }).join('');
+
+                const body = rows.length
+                    ? rows.map(row => `<tr>${columns.map(col => `<td>${row[col.key] ?? ''}</td>`).join('')}</tr>`).join('')
+                    : `<tr><td colspan="${columns.length}">${t('immo', 'No records found')}</td></tr>`;
+
+                target.innerHTML = `<table class="immo-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
+
+                if (onSort) {
+                    target.querySelectorAll('th[data-sort-key]').forEach(th => {
+                        th.addEventListener('click', () => {
+                            const key = th.dataset.sortKey;
+                            const nextDir = sortState && sortState.key === key && sortState.dir === 'asc' ? 'desc' : 'asc';
+                            onSort({ key, dir: nextDir });
+                        });
+                    });
+                }
+            };
+
+            const enableStaticSorts = () => {
+                document.querySelectorAll('table.immo-table').forEach((table) => {
+                    const headers = table.querySelectorAll('th[data-sort-key]');
+                    headers.forEach((th, index) => {
+                        th.addEventListener('click', () => {
+                            const currentDir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+                            th.dataset.dir = currentDir;
+                            const tbody = table.tBodies[0];
+                            const rows = Array.from(tbody.rows);
+                            rows.sort((a, b) => {
+                                const av = a.cells[index].textContent.trim();
+                                const bv = b.cells[index].textContent.trim();
+                                return currentDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+                            });
+                            headers.forEach(h => {
+                                if (h !== th) h.dataset.dir = '';
+                                const indicator = h.querySelector('.sort-indicator');
+                                if (indicator) indicator.textContent = '⇅';
+                            });
+                            const indicator = th.querySelector('.sort-indicator');
+                            if (indicator) indicator.textContent = currentDir === 'asc' ? '↑' : '↓';
+                            rows.forEach(row => tbody.appendChild(row));
+                        });
+                    });
+                });
+            };
+
+            return { render, sortRows, enableStaticSorts };
+        })();
+
+        return { Modal: { open: openModal, close: closeModal, attachCloseHandlers }, Table };
+    })();
+
     Immo.StateStore = (() => {
         const state = {
             currentRoute: 'dashboard',
@@ -141,27 +238,54 @@ window.Immo = window.Immo || {};
     })();
 
     Immo.Views.Properties = (() => {
+        const columns = [
+            { key: 'name', label: t('immo', 'Name') },
+            { key: 'city', label: t('immo', 'City') },
+            { key: 'type', label: t('immo', 'Type') },
+            { key: 'actions', label: t('immo', 'Actions'), sortable: false },
+        ];
+
+        let sortState = { key: 'name', dir: 'asc' };
+
         const bindEvents = () => {
             loadList();
             const addBtn = document.querySelector('[data-action="prop-add"]');
             addBtn && addBtn.addEventListener('click', () => openForm());
+            Immo.UI.Modal.attachCloseHandlers();
         };
 
         const loadList = async () => {
-            const container = document.getElementById('prop-list');
+            const container = document.getElementById('prop-table');
             try {
                 const data = await Immo.Api.getJson(OC.generateUrl('/apps/immo/api/prop'));
-                container.innerHTML = data.map(item => `<div class="row"><span>${item.name}</span><button data-action="prop-edit" data-id="${item.id}">${t('immo', 'Edit')}</button><button data-action="prop-delete" data-id="${item.id}">${t('immo', 'Delete')}</button></div>`).join('');
-                container.querySelectorAll('[data-action="prop-edit"]').forEach(btn => btn.addEventListener('click', (e) => openForm(e.currentTarget.dataset.id)));
-                container.querySelectorAll('[data-action="prop-delete"]').forEach(btn => btn.addEventListener('click', (e) => deleteProp(e.currentTarget.dataset.id)));
+                renderTable(data);
             } catch (e) {
                 container.textContent = t('immo', 'Failed to load properties');
             }
         };
 
+        const renderTable = (data) => {
+            const sorted = Immo.UI.Table.sortRows(data, sortState);
+            const rows = sorted.map(item => ({
+                name: item.name,
+                city: item.city || '',
+                type: item.type || '',
+                actions: `<div class="row-actions"><button data-action="prop-edit" data-id="${item.id}">${t('immo', 'Edit')}</button><button data-action="prop-delete" data-id="${item.id}">${t('immo', 'Delete')}</button></div>`
+            }));
+
+            Immo.UI.Table.render('prop-table', columns, rows, sortState, (newSort) => {
+                sortState = newSort;
+                renderTable(data);
+            });
+
+            const container = document.getElementById('prop-table');
+            container.querySelectorAll('[data-action="prop-edit"]').forEach(btn => btn.addEventListener('click', (e) => openForm(e.currentTarget.dataset.id)));
+            container.querySelectorAll('[data-action="prop-delete"]').forEach(btn => btn.addEventListener('click', (e) => deleteProp(e.currentTarget.dataset.id)));
+        };
+
         const openForm = (id = null) => {
             const modal = document.getElementById('prop-form-modal');
-            modal.classList.add('open');
+            Immo.UI.Modal.open('prop-form-modal');
             const form = modal.querySelector('form');
             form.reset();
             if (id) {
@@ -190,7 +314,7 @@ window.Immo = window.Immo || {};
             try {
                 await method(url, payload);
                 OC.Notification.showTemporary(t('immo', 'Property saved'));
-                document.getElementById('prop-form-modal').classList.remove('open');
+                Immo.UI.Modal.close('prop-form-modal');
                 loadList();
             } catch (e) {
                 OC.Notification.showTemporary(t('immo', 'Could not save property'));
@@ -210,7 +334,9 @@ window.Immo = window.Immo || {};
     })();
 
     Immo.Views.Units = Immo.Views.Tenants = Immo.Views.Leases = Immo.Views.Bookings = Immo.Views.Reports = (() => {
-        const bindEvents = () => {};
+        const bindEvents = () => {
+            Immo.UI.Table.enableStaticSorts();
+        };
         return { bindEvents };
     })();
 

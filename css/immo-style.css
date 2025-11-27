@@ -1,0 +1,79 @@
+.immo-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+}
+
+.immo-table th,
+.immo-table td {
+    padding: 8px;
+    border-bottom: 1px solid var(--color-border, #ddd);
+    text-align: left;
+}
+
+.immo-table th {
+    cursor: pointer;
+    user-select: none;
+}
+
+.immo-table th .sort-indicator {
+    margin-left: 6px;
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.immo-table tbody tr:hover {
+    background-color: var(--color-background-hover, #f5f5f5);
+}
+
+.immo-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.35);
+    align-items: center;
+    justify-content: center;
+}
+
+.immo-modal.open {
+    display: flex;
+}
+
+.immo-modal__dialog {
+    background: var(--color-main-background, #fff);
+    border-radius: 8px;
+    padding: 16px;
+    min-width: 420px;
+    max-width: 640px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.immo-modal__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.immo-modal__body label {
+    display: block;
+    margin-bottom: 10px;
+}
+
+.immo-modal__body input,
+.immo-modal__body textarea,
+.immo-modal__body select {
+    width: 100%;
+    margin-top: 4px;
+}
+
+.immo-modal__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}
