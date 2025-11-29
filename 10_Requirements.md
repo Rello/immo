@@ -4,7 +4,7 @@
 
 ## Ziel
 
-Die Immo App ist eine Erweiterung für Nextcloud, die kleine bis mittelgroße Immobilienverwalter, Vermieter und Eigentümergemeinschaften bei der Verwaltung von Immobilien, Mietobjekten, Mietern und Mietverhältnissen unterstützt.  
+Die Domus Immobilien Verwaltung ist eine App für Nextcloud, die kleine bis mittelgroße Immobilienverwalter, Vermieter und Eigentümergemeinschaften bei der Verwaltung von Immobilien, Mietobjekten, Mietern und Mietverhältnissen unterstützt.  
 Sie nutzt ausschließlich bestehende Nextcloud-Funktionalitäten (Benutzer, Authentifizierung, Datenbank, Dateisystem) und stellt ein zentrales, strukturiertes System zur Erfassung von Stammdaten, Einnahmen, Ausgaben und zur Erstellung von Jahresabrechnungen bereit.
 
 Der Name der App ist "Domus"
@@ -41,7 +41,7 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
      - Zugriff auf hinterlegte Dokumente wie Mietvertrag.
 
 3. **Administrator der Nextcloud-Instanz (technische Rolle)**
-   - Rolle: installiert und konfiguriert die Immo App innerhalb von Nextcloud.
+   - Rolle: installiert und konfiguriert die App innerhalb von Nextcloud.
    - Bedürfnisse:
      - Einfache Installation und Konfiguration ohne tiefgreifende Systemänderungen.
      - Keine Erweiterung der Nextcloud-Kernfunktionen.
@@ -58,7 +58,7 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 - Rollenmodell innerhalb der App: mind. „Verwalter“ und „Mieter“ (z. B. via Gruppen oder App-Konfiguration).
 
 1.2 **Navigation & Layout**
-- Zugriff auf die Immo App über einen Eintrag in der Nextcloud-Hauptnavigation.
+- Zugriff auf die App über einen Eintrag in der Nextcloud-Hauptnavigation.
 - Einheitliche Nutzung von Nextcloud-Layout und -Designrichtlinien.
 - Navigation auf der Linken Seite; Content im Hauptfenster
 - Client-seitige Render-Templates für alle Seiten.
@@ -69,7 +69,7 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 1.3 **Dateisystem-Anbindung**
 - Zugriff auf das Nextcloud-Dateisystem des jeweiligen Benutzers.
 - Verknüpfung vorhandener Dateien mit Datensätzen (Immobilie, Mietobjekt, Mieter, Mietverhältnis, Einnahme/Ausgabe).
-- Ablage generierter Abrechnungen als Datei in einem definierbaren Ordner (z. B. `/ImmoApp/Abrechnungen/<Jahr>/`).
+- Ablage generierter Abrechnungen als Datei in einem definierbaren Ordner (z. B. `/DomusApp/Abrechnungen/<Jahr>/`).
 
 ---
 
@@ -239,7 +239,7 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 
 - Abrechnung wird serverseitig generiert (Textdatei in V1).
 - Ablage im Nextcloud-Dateisystem in einem festgelegten Ordner mit strukturierter Benennung:
-  - z. B. `/ImmoApp/Abrechnungen/<Jahr>/<Immobilie>/<Dateiname>.md`.
+  - z. B. `/DomusApp/Abrechnungen/<Jahr>/<Immobilie>/<Dateiname>.md`.
 - Verknüpfung der erzeugten Abrechnungsdatei mit:
   - Immobilie
   - ggf. Mietobjekt/Mietverhältnis/Mieter.
@@ -309,7 +309,7 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 
 ### 1. Dashboard
 
-1.1 Ein Verwalter kann die Immo App über die Nextcloud-Navigation öffnen und sieht ein Dashboard.  
+1.1 Ein Verwalter kann die App über die Nextcloud-Navigation öffnen und sieht ein Dashboard.  
 1.2 Das Dashboard zeigt mindestens:
 - Anzahl der verwalteten Immobilien.
 - Anzahl der Mietobjekte.
@@ -379,7 +379,7 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 
 ### 9. Technische und Integrationskriterien
 
-9.1 Die Immo App ist als Nextcloud-App installierbar und nutzt ausschließlich:
+9.1 Die App ist als Nextcloud-App installierbar und nutzt ausschließlich:
 - Nextcloud-Benutzerkonten,
 - Nextcloud-Datenbank (über das App-Framework),
 - Nextcloud-Dateisystem.
@@ -389,4 +389,4 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 
 ---
 
-Dieses Dokument bildet die Basis für Konzeption, Implementierung und Abnahme der ersten Version der Immo App.
+Dieses Dokument bildet die Basis für Konzeption, Implementierung und Abnahme der ersten Version der App.
