@@ -7,9 +7,9 @@
 Die Immo App ist eine Erweiterung für Nextcloud, die kleine bis mittelgroße Immobilienverwalter, Vermieter und Eigentümergemeinschaften bei der Verwaltung von Immobilien, Mietobjekten, Mietern und Mietverhältnissen unterstützt.  
 Sie nutzt ausschließlich bestehende Nextcloud-Funktionalitäten (Benutzer, Authentifizierung, Datenbank, Dateisystem) und stellt ein zentrales, strukturiertes System zur Erfassung von Stammdaten, Einnahmen, Ausgaben und zur Erstellung von Jahresabrechnungen bereit.
 
-Der Name der App ist "Immobilien"
-Der Namespace ist "Immo"
-Die Nextcloud-id der App ist "immo"
+Der Name der App ist "Domus"
+Der Namespace ist "Domus"
+Die Nextcloud-id der App ist "domus"
 
 Die erste Version (MVP) gilt als erfolgreich, wenn:
 
