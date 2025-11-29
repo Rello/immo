@@ -1,4 +1,4 @@
-**Immo App – Anforderungsdokument V1**
+**Domus Verwaltung – Anforderungsdokument V1**
 
 ---
 
