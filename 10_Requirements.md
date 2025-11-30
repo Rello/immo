@@ -6,6 +6,8 @@
 
 Die Domus Immobilien Verwaltung ist eine App für Nextcloud, die kleine bis mittelgroße Immobilienverwalter, Vermieter und Eigentümergemeinschaften bei der Verwaltung von Immobilien, Mietobjekten, Mietern und Mietverhältnissen unterstützt.  
 Sie nutzt ausschließlich bestehende Nextcloud-Funktionalitäten (Benutzer, Authentifizierung, Datenbank, Dateisystem) und stellt ein zentrales, strukturiertes System zur Erfassung von Stammdaten, Einnahmen, Ausgaben und zur Erstellung von Jahresabrechnungen bereit.
+Verwalter und Vermieter sind unterschiedliche Rollen, die unterschiedliche Inhalte pro Objekt bereitstellen.
+Ein Nextcloud Nutzer kann sowohl Verwalter für eine Immobilie sein, als auch Eigentümer/Vermieter für eine andere Immobilie. Pro Immobilie wählt dieser seine eigene Rolle, welche das weitere Vorgehen bestimmt.
 
 Der Name der App ist "Domus"
 Der Namespace ist "Domus"
@@ -16,7 +18,6 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 - ein nutzbares Dashboard angezeigt wird,
 - alle relevanten Erfassungsmasken funktionieren (Immobilien, Mietobjekte, Mieter, Mietverhältnisse, Einnahmen, Ausgaben),
 - Dokumente aus dem Nextcloud-Dateisystem mit Datensätzen verknüpft werden können,
-- mindestens eine Jahresabrechnung erzeugt und als Datei im Nextcloud-Dateisystem abgelegt werden kann.
 - In V1 wird nur eine Währung Euro unterstützt
 - Alle CRUD Prozesse werden im Frontend grundlegend bereitgestellt
 
@@ -24,23 +25,43 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 
 ## Nutzergruppen
 
-1. **Verwalter / Vermieter (Primärnutzer)**
-   - Rolle: legt Stammdaten an, pflegt Einnahmen und Ausgaben, verwaltet Mietverhältnisse, erstellt Abrechnungen.
+1. **Verwalter (Primärnutzer)**
+   - Ein Verwalter verwaltet Immobilien für eine Eigentümergemeinschaft
+   - Rolle: Legt Immobilien als Verwalter an, legt und Objekte und Eigentümer an. Pflegt Stammdaten. Erfasst Einnahmen und Ausgaben für Immobilien, erstellt Abrechnungen.
    - Bedürfnisse:
      - Schneller Überblick über Immobilienbestand und Wirtschaftlichkeit.
      - Einfache Eingabe und Pflege von Daten.
      - Strukturiertes Ablegen und Wiederfinden von Dokumenten (Verträge, Rechnungen, Bescheide).
-     - Erstellung von Jahresabrechnungen pro Immobilie / Mietobjekt / Mieter.
+     - Erstellung von Jahresabrechnungen pro Immobilie.
    - Es kann beliebig viele Verwalter geben, die nur ihre eigenen Objekte sehen.
 
-2. **Mieter (Sekundärnutzer)**
-   - Rolle: hat lesenden Zugriff auf eigene Daten und Abrechnungen.
+2. **Vermieter (Primärnutzer)**
+   - Ein Verieter verwaltet seine eigenenen Mietobjekte und Mietverträge
+   - Rolle: Legt Immobilien als Vermieter an, legt objekte und Mieter an. pflegt Stammdaten, pflegt Einnahmen und Ausgaben für Mietobjekte, verwaltet Mietverhältnisse, erstellt Abrechnungen.
+   - Bedürfnisse:
+     - Schneller Überblick über Objektbestand und Wirtschaftlichkeit.
+     - Einfache Eingabe und Pflege von Daten.
+     - Strukturiertes Ablegen und Wiederfinden von Dokumenten (Verträge, Rechnungen, Bescheide).
+     - Erstellung von Jahresabrechnungen pro Mietobjekt / Mieter.
+   - Es kann beliebig viele Verwalter geben, die nur ihre eigenen Objekte sehen.
+
+4. **Mieter (Sekundärnutzer)**
+   - Rolle: hat lesenden Zugriff auf eigene Daten und Abrechnungen zu seinen Mietverträgen.
+   - Der Mieter ist der Kunde des Eigentümers
+   - Bedürfnisse:
+     - Zugriff auf aktuelle und historische Abrechnungen.
+     - Einsicht in relevante Stammdaten zum eigenen Mietverhältnis (z. B. Mietobjekt, Konditionen).
+     - Zugriff auf hinterlegte Dokumente wie Mietvertrag.
+    
+5. **Eigentümer (Sekundärnutzer)**
+   - Rolle: hat lesenden Zugriff auf eigene Daten und Abrechnungen seines Objektes.
+   - Der Eigentümer ist der Kunde des Verwalters
    - Bedürfnisse:
      - Zugriff auf aktuelle und historische Abrechnungen.
      - Einsicht in relevante Stammdaten zum eigenen Mietverhältnis (z. B. Mietobjekt, Konditionen).
      - Zugriff auf hinterlegte Dokumente wie Mietvertrag.
 
-3. **Administrator der Nextcloud-Instanz (technische Rolle)**
+6. **Administrator der Nextcloud-Instanz (technische Rolle)**
    - Rolle: installiert und konfiguriert die App innerhalb von Nextcloud.
    - Bedürfnisse:
      - Einfache Installation und Konfiguration ohne tiefgreifende Systemänderungen.
@@ -89,10 +110,11 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
   - Detailansicht pro Immobilie mit:
     - Liste der zugehörigen Mietobjekte
     - zentrale Kennzahlen (z. B. Gesamtmiete/Jahr, Rendite/Kostendeckung pro Jahr – soweit berechnet).
-- Eine Immobilie ist nur einem Verwalter zugeordnet.
-- Jeder Verwalter sieht nur seine eignen Immobilien.
+- Eine Immobilie ist nur einem Verwalter oder einem Eigentümer zugeordnet.
+- Jeder Verwalter und jeder Eigentümer sieht nur seine eignen Immobilien.
+- Zu einer Immobilie ist ein ein Merkmal zu erfassen, ob diese aus der Sich eines Verwalters oder eines Vermieters verwendet wird
 
-#### 2.2 Mietobjekte
+#### 2.2 Mietobjekte/Untereinheiten
 
 - Mietobjekte sind einer Immobilie zugeordnet.
 - Anlegen, Bearbeiten, Löschen von Mietobjekten.
@@ -106,6 +128,7 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
   - Art (Wohnung, Gewerbe, Stellplatz etc.) – optional
   - Notizen
   - Verknüpfte Dokumente (z. B. Grundriss)
+  - Verknüpfte Geschäftspartner (Mieter oder Eigentümer)
 - Anzeige:
   - Liste der Mietobjekte pro Immobilie.
   - Detailansicht je Mietobjekt mit:
@@ -114,10 +137,12 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
     - Relevante Einnahmen/Ausgaben
     - Kennzahlen (z. B. Miete pro m²).
 
-#### 2.3 Mieter
+#### 2.3 Geschäftspartner (Sekundärnutzer)
 
-- Anlegen, Bearbeiten, Löschen von Mietern (personenbezogene Stammdaten).
+- Dies sind die Eigentümer aus der Sicht des Verwalters oder die Mieter aus der Sicht des Vermieters
+- Anlegen, Bearbeiten, Löschen von personenbezogene Stammdaten
 - Mögliche Felder:
+  - Art: Mieter, Eigentümer
   - Name (Pflicht)
   - Kontaktdaten (Adresse, E-Mail, Telefon) – optional
   - Kundennummer/Referenz – optional
@@ -176,10 +201,7 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 - Erfassung von Einnahmen (z. B. Mieten, Nebenkosten) und Ausgaben (z. B. Reparaturen, Kreditzinsen, Versicherungen).
 - Zuordnung mindestens zu:
   - Jahr (Pflicht)
-  - Immobilie (Pflicht; alternativ direkter Bezug zu Mietobjekt, aber Immobilie muss ableitbar sein)
-- Optionale Zuordnung zu:
-  - Mietobjekt
-  - Mietverhältnis
+  - Immobilie oder Mietobjekt/Untereinheit oder Mietverhältnis (Pflicht)
 - Mehrfachzuordnung/Verteilregeln werden in V1 nur soweit umgesetzt, wie für Jahresverteilungen erforderlich ist.
 
 #### 4.2 Felder Einnahme/Ausgabe
@@ -189,11 +211,7 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 - Datum (Pflicht).
 - Betrag (Pflicht).
 - Beschreibung/Verwendungszweck (Freitext).
-- Bezug:
-  - Immobilie (Pflicht)
-  - Mietobjekt (optional; Auswahl eingeschränkt auf Mietobjekte der Immobilie)
-  - Mietverhältnis (optional; Auswahl eingeschränkt auf Mietverhältnisse des Mietobjekts)
-  - Jahr (automatisch aus Datum ableitbar, aber im Modell als Feld für Auswertungen verfügbar).
+- Bezug: Immobilie oder Mietobjekt/Untereinheit oder Mietverhältnis (Pflicht)
 - Verknüpfte Dokumente (z. B. Rechnung, Kontoauszug als Datei aus Nextcloud).
 
 #### 4.3 Verteilung bei unterjährigen Mietwechseln
@@ -332,14 +350,6 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 3.4 In der Detailansicht eines Mietobjekts werden alle aktuellen und historischen Mietverhältnisse angezeigt.  
 3.5 In der Detailansicht eines Mieters werden alle aktuellen und historischen Mietverhältnisse angezeigt.
 
-### 4. Einnahmen und Ausgaben
-
-4.1 Verwalter kann Einnahmen erfassen, mindestens mit Feldern: Datum, Betrag, Kategorie, Immobilie.  
-4.2 Verwalter kann Ausgaben erfassen, mindestens mit denselben Pflichtfeldern.  
-4.3 Einnahmen/Ausgaben können optional einem Mietobjekt und/oder Mietverhältnis zugeordnet werden.  
-4.4 Die Jahreszugehörigkeit wird aus dem Datum korrekt abgeleitet und in Listen/Statistiken genutzt.  
-4.5 Listenansichten für Einnahmen und Ausgaben sind verfügbar und filterbar nach Jahr und Immobilie.
-
 ### 5. Dokumentenverknüpfung
 
 5.1 Verwalter kann bei folgenden Datensätzen eine Datei aus dem Nextcloud-Dateisystem auswählen und verknüpfen:
@@ -350,23 +360,6 @@ Die erste Version (MVP) gilt als erfolgreich, wenn:
 - Einnahme/Ausgabe
 5.2 Verknüpfte Dateien werden in der Detailansicht des Datensatzes als Liste mit Link angezeigt.  
 5.3 Ein Klick auf den Link öffnet die Datei über Nextcloud (gemäß den Nextcloud-Berechtigungen).
-
-### 6. Abrechnungen
-
-6.1 Verwalter kann für eine Immobilie und ein Jahr eine Abrechnung erstellen.  
-6.2 Die Abrechnung aggregiert Einnahmen und Ausgaben des gewählten Jahres für die Immobilie und zeigt mindestens:
-- Summe Einnahmen
-- Summe Ausgaben
-- Differenz (Netto-Ergebnis)
-6.3 Die Abrechnung wird als Datei (z. B. PDF) im Nextcloud-Dateisystem in einem vorgegebenen Ordner gespeichert.  
-6.4 Die gespeicherte Abrechnung wird in der Immo App in einer Liste historischer Abrechnungen zu der Immobilie angezeigt.  
-6.5 Die Abrechnungsdatei kann über die App heruntergeladen/geöffnet werden.
-
-### 7. Berechnungen & Verteilungen
-
-7.1 Für mindestens ein Mietobjekt mit hinterlegter Fläche und einem aktiven Mietverhältnis wird die Miete pro m² korrekt berechnet (Kaltmiete / Fläche).  
-7.2 Die App berechnet für ein Jahr pro Immobilie die Summe aller Einnahmen und Ausgaben korrekt.  
-7.3 Für mindestens einen als Jahresbetrag erfassten Aufwand (z. B. Kreditzinsen) wird eine anteilige Verteilung nach Monaten auf die aktiven Mietverhältnisse des Jahres erzeugt und in einer Statistik sichtbar gemacht (z. B. als Anteil pro Mietverhältnis).
 
 ### 8. Nutzerrollen
 
