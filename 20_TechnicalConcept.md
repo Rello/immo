@@ -1,553 +1,479 @@
 ## Architektur
 
-Die Immo App („Immobilien“, Namespace `Immo`, App-ID `immo`) wird als klassische Nextcloud-App nach AppFramework-Standard umgesetzt.
+Domus wird als klassische Nextcloud-App umgesetzt, basierend auf dem AppFramework (MVC).
 
-**Grundprinzipien**
+**Backend (PHP / AppFramework)**  
+- Namespace: `OCA\Domus`  
+- Bootstrap über `lib/AppInfo/Application.php` (implementiert `IBootstrap`)  
+- Registrierung von:
+  - DI-Services (z. B. `PropertyService`, `UnitService`, `PartnerService`, `TenancyService`, `BookingService`, `ReportService`, `DashboardService`)
+  - Event-Listener falls später benötigt (V1 minimal)
+- Controller-Schicht:
+  - `DashboardController`
+  - `PropertyController` (Immobilien)
+  - `UnitController` (Mietobjekte)
+  - `PartnerController` (Geschäftspartner Mieter/Eigentümer)
+  - `TenancyController` (Mietverhältnisse)
+  - `BookingController` (Einnahmen/Ausgaben)
+  - `ReportController` (Abrechnungen)
+  - `FileLinkController` (Dokumentenverknüpfung)
+  - `RoleController` (rollenbezogene Ansichten)
+- Service-Schicht:
+  - Businesslogik, Validierung, Berechnungen (Rendite, Miete/m², Verteillogik)
+- Persistenz-Schicht:
+  - Entities + Mapper (AppFramework `OCP\AppFramework\Db`)
 
-- Serverseitige Views mit PHP-Templates (Nextcloud-Standard).
-- Business-Logik in Services, Datenzugriff über Mapper/Entities (AppFramework-ORM).
-- Kommunikation Frontend ↔ Backend über JSON-AJAX-Endpoints (keine OCS-Routes).
-- UI-Update über Vanilla-JS, keine vollständigen Seitenreloads – nur Content innerhalb `#app-content` wird ersetzt.
-- Nutzung von:
-  - Nextcloud-Userverwaltung (OCP\IUserManager)
-  - Nextcloud-Gruppen (für Rollen „Verwalter“, „Mieter“)
-  - Nextcloud-DB (Migrations)
-  - Nextcloud-Dateisystem (OCP\Files\IRootFolder, OCP\Files\Node)
+**Frontend (Vanilla JS)**  
+- Ein einzelnes serverseitiges Haupt-Template (`index.php`) liefert:
+  - `<div id="app-navigation"></div>`
+  - `<div id="app-content"></div>`
+  - `<div id="app-sidebar"></div>`
+- Einbindung eines JS-Bundles (kein Webpack, plain ES6) über `script`-Tag.
+- Clientseitiges Modul-Pattern/Namespace: `Domus` mit Untermodulen:
+  - `Domus.Navigation`
+  - `Domus.Api`
+  - `Domus.Views.Dashboard`
+  - `Domus.Views.Properties`
+  - `Domus.Views.Units`
+  - `Domus.Views.Partners`
+  - `Domus.Views.Tenancies`
+  - `Domus.Views.Bookings`
+  - `Domus.Views.Reports`
+- AJAX-Kommunikation zu den Controllern (JSON), dynamisches Rendering im `app-content` und `app-sidebar`.
+- Navigation wird clientseitig gesteuert (Kein Full-Page-Reload).
 
-**Schichtenmodell**
+**Nextcloud-Integration**  
+- Authentifizierung/Benutzer: via Standard-Login (OCP\IUserSession).
+- Rollen innerhalb der App:
+  - Ableitung aus Gruppen/Zugehörigkeit:
+    - Gruppe `domus_admin` optional für erweiterte Rechte (Verwalter)
+    - Mieter/Eigentümer-Zuweisung über eigene Domus-Stammdaten und Zuordnung zu Nextcloud-Benutzern (optional für V1 – reine Leseansicht auch ohne NC-User möglich, wenn kein Login benötigt wird).
+- Dateisystem:
+  - Nutzung von `OCP\Files\IRootFolder` und `IUserFolder` für Zugriff auf User-Files
+  - Ablageordner für Abrechnungen unterhalb des Nutzer-Home: `DomusApp/Abrechnungen/<Jahr>/<Immobilie>/`
 
-- Präsentation:
-  - PHP-Template `index.php` mit Grundlayout (`#app-navigation`, `#app-content`, `#app-sidebar`).
-  - JS-Modul `Immo.App` steuert Navigation, lädt Teil-Views per AJAX, rendert HTML.
-- API / Controller:
-  - ViewController (HTML-Templates, serverseitiges Rendering von „Partials“).
-  - ApiController (JSON für CRUD und Statistiken).
-- Service-Layer:
-  - `PropertyService`, `UnitService`, `TenantService`, `LeaseService`,
-    `BookingService`, `ReportService`, `DashboardService`,
-    `FileLinkService`, `RoleService`.
-- Persistence:
-  - Entities + Mapper pro Domänenobjekt (AppFramework-DB).
-- Integration:
-  - Filesystem/Abrechnungen über IRooFolder, User/Groups über OCP-APIs.
-
-Deployment: App-Ordner `apps/immo/` mit standardkonformer `info.xml`, `appinfo/routes.php`, Migrations, lib/, templates/, js/.
-
+---
 
 ## Hauptkomponenten
 
-### 1. Datenmodell (Entities / Tabellen)
+### Backend-Komponenten
 
-Tabellennamen und Spaltennamen ≤ 20 Zeichen.
+**1. Entities / Tabellen (max. 23 Zeichen)**
 
-**1.1 Immobilien** – Tabelle: `immo_prop`
+Alle Entities implementieren `JsonSerializable` und nutzen die Nextcloud-Annotations für Mapping. Attribute in `lowerCamelCase`, Tabellen mit max. 23 Zeichen.
 
-- `id` (PK, int)
-- `uid_owner` (string, Nextcloud-User-ID des Verwalters)
-- `name` (string)
-- `street` (string, optional)
-- `zip` (string, optional)
-- `city` (string, optional)
-- `country` (string, optional)
-- `type` (string, optional: Haus, ETW, etc.)
-- `note` (text, optional)
-- `created_at` (int, timestamp)
-- `updated_at` (int, timestamp)
+1. `domus_properties` (Immobilien)
+   - `id` (int, PK)
+   - `user_id` (string, Nextcloud-User, dem die Immobilie gehört – Verwalter oder Vermieter)
+   - `roleType` (string: `manager` | `landlord`) – Sichtweise der Immobilie
+   - `name`
+   - `street`
+   - `zipCode`
+   - `city`
+   - `country`
+   - `objectType` (optional)
+   - `notes` (text)
+   - `createdAt`, `updatedAt`
 
-**1.2 Mietobjekte** – Tabelle: `immo_unit`
+2. `domus_units` (Mietobjekte / Untereinheiten)
+   - `id`
+   - `propertyId` (FK -> properties)
+   - `name` (Bezeichnung)
+   - `locationCode` (Wohnungsnummer/Türnummer)
+   - `landRegister` (Grundbuch-Eintrag)
+   - `livingArea` (float)
+   - `usableArea` (float, optional)
+   - `unitType` (optional: Wohnung, Gewerbe etc.)
+   - `notes`
+   - `createdAt`, `updatedAt`
+   - `partnerId` (optional)
 
-- `id`
-- `prop_id` (FK → `immo_prop.id`)
-- `label` (Bezeichnung)
-- `loc` (Lage/Nummer)
-- `gbook` (Grundbuch)
-- `area_res` (float, Wohnfläche)
-- `area_use` (float, Nutzfläche)
-- `type` (string, optional)
-- `note` (text, optional)
-- `created_at`
-- `updated_at`
+3. `domus_partners` (Geschäftspartner Mieter/Eigentümer)
+   - `id`
+   - `user_id` (NC-User, dem der Partner „gehört“, i.e. Verwalter/Vermieter)
+   - `partnerType` (`tenant` | `owner`)
+   - `name`
+   - `street`
+   - `zipCode`
+   - `city`
+   - `email`
+   - `phone`
+   - `customerNumber`
+   - `notes`
+   - `ncUserId` (optional: Mapping auf Nextcloud-User, falls Partner auch NC-Account hat)
+   - `createdAt`, `updatedAt`
 
-**1.3 Mieter** – Tabelle: `immo_tenant`
+4. `domus_tenancies` (Mietverhältnisse)
+   - `id`
+   - `unitId` (FK -> units)
+   - `partnerId` (FK -> partners, Typ `tenant`)
+   - `startDate` (date)
+   - `endDate` (date, nullable)
+   - `baseRent` (decimal)
+   - `additionalCosts` (decimal)
+   - `additionalCostsType` (z.B. `prepayment` | `included` optional)
+   - `deposit` (decimal)
+   - `conditions` (text)
+   - `status` (`active` | `historical` | `future` – wird bei Save berechnet)
+   - `createdAt`, `updatedAt`
 
-- `id`
-- `uid_owner` (Verwalter, dem der Mieter „gehört“)
-- `name`
-- `addr` (Adressblock, optional)
-- `email` (optional)
-- `phone` (optional)
-- `cust_no` (Kundennummer, optional)
-- `note` (text, optional)
-- `created_at`
-- `updated_at`
+5. `domus_bookings` (Einnahmen/Ausgaben)
+   - `id`
+   - `user_id` (NC-User)
+   - `bookingType` (`income` | `expense`)
+   - `category` (Text: Miete, Nebenkosten, etc.)
+   - `bookingDate` (date)
+   - `amount` (decimal, Euro in V1)
+   - `description` (text)
+   - `entityType` (`property`, `unit`, `tenancy`)
+   - `entityId`
+   - `year` (int, redundante Spalte für schnelle Filterung)
+   - `createdAt`, `updatedAt`
 
-**1.4 Mietverhältnisse** – Tabelle: `immo_lease`
+6. `domus_file_links` (Verknüpfung von Nextcloud-Dateien)
+   - `id`
+   - `user_id`
+   - `entityType` (`property`, `unit`, `partner`, `tenancy`, `booking`, `report`)
+   - `entityId`
+   - `filePath` (relativ zum User-Home, z. B. `Files/...`)
+   - `fileId` (optional, NC FileId falls sinnvoll beschaffbar)
+   - `label` (z. B. „Mietvertrag“)
+   - `createdAt`
 
-- `id`
-- `unit_id` (FK → `immo_unit.id`)
-- `tenant_id` (FK → `immo_tenant.id`)
-- `start` (date)
-- `end` (date, nullable)
-- `rent_cold` (decimal)
-- `costs` (decimal, Nebenkosten/-vorauszahlung, optional)
-- `costs_type` (string, optional; Flag: „incl“, „adv“ etc.)
-- `deposit` (decimal, optional)
-- `cond` (text, weitere Konditionen)
-- `status` (string: `active`, `hist`, `future`)
-- `created_at`
-- `updated_at`
+7. `domus_reports` (Metadaten Abrechnungen)
+   - `id`
+   - `user_id`
+   - `year`
+   - `propertyId`
+   - `unitId` (nullable)
+   - `tenancyId` (nullable)
+   - `reportType` (`propertyYear` | später weitere)
+   - `filePath` (Pfad im User-Home: `DomusApp/Abrechnungen/...`)
+   - `createdAt`
 
-**1.5 Einnahmen/Ausgaben (Buchungen)** – Tabelle: `immo_book`
+8. Optional: `domus_dash_cache` (für spätere Performance, V1 nicht zwingend).
 
-- `id`
-- `type` (string: `in` oder `out`)
-- `cat` (Kategorie)
-- `date` (date)
-- `amt` (decimal)
-- `desc` (text, Beschreibung)
-- `prop_id` (FK → `immo_prop.id`, Pflicht)
-- `unit_id` (FK → `immo_unit.id`, optional)
-- `lease_id` (FK → `immo_lease.id`, optional)
-- `year` (int, redundante Jahresangabe)
-- `is_yearly` (bool, Flag für Jahresbetrag-Verteilung)
-- `created_at`
-- `updated_at`
+**Mapper**  
+Für jede Tabelle ein `Mapper` (z. B. `PropertyMapper`) mit Standardmethoden:
+- `find(int $id)`, `findAllByOwner(string $userId, int $limit, int $offset)`
+- Spezifische Filter (z. B. `findByProperty(int $propertyId)` etc.)
 
-**1.6 Datei-Verknüpfungen** – Tabelle: `immo_filelink`
+**Services**
 
-Generischer Ansatz: Link zwischen App-Objekt und Nextcloud-Datei (FileId oder Pfad).
+1. `PropertyService`
+   - CRUD für Immobilien inkl. Owner-Check.
+   - Aggregationsfunktionen: Anzahl Mietobjekte, Summe Mieten/Jahr etc.
 
-- `id`
-- `obj_type` (string: `prop`, `unit`, `tenant`, `lease`, `book`, `report`)
-- `obj_id` (int)
-- `file_id` (int, Nextcloud fileid)
-- `path` (string, redundanter Pfad zur Anzeige)
-- `created_at`
+2. `UnitService`
+   - CRUD für Einheiten, Zuordnung zu Immobilie.
+   - Berechnung Miete/m² auf Basis aktiver Mietverhältnisse.
 
-**1.7 Abrechnungen** – Tabelle: `immo_report`
+3. `PartnerService`
+   - CRUD für Geschäftspartner.
+   - Suche/Filter (Name, Typ).
+   - Optionale Verbindung zu NC-User (`ncUserId`).
 
-- `id`
-- `prop_id` (FK → `immo_prop.id`)
-- `year` (int)
-- `file_id` (int, Datei im NC-FS)
-- `path` (string, Pfad `/ImmoApp/Abrechnungen/<Jahr>/<Immobilie>/...`)
-- `created_at`
+4. `TenancyService`
+   - CRUD für Mietverhältnisse.
+   - Automatische Statusberechnung bei Save (active/historical/future).
+   - Abfrage: Mietverhältnisse pro Einheit, pro Partner.
+   - Hilfsfunktionen für Zeitraum-Betrachtung (Monatsanzahl im Jahr, Aktivität zum Stichtag).
 
-**1.8 Rollen-Zuordnung (App-intern)** – Tabelle: `immo_role`
+5. `BookingService`
+   - CRUD für Einnahmen/Ausgaben.
+   - Sicherstellen, dass genau eine Referenz (Immobilie/Unit/Tenancy) gesetzt ist.
+   - Jahresauswertungen (Summen nach Kategorie, Income/Expense, je Immobilie/Unit).
+   - Logik für Jahresverteilungs-Auswertung (keine Einzelbuchungen in V1, nur Berechnung).
 
-Ermöglicht flexible Rollen unabhängig von NC-Gruppen.
+6. `ReportService`
+   - Generieren von Jahresabrechnungen:
+     - pro Immobilie (`reportType: propertyYear`).
+   - Verwendung von `BookingService` und `TenancyService` für Kennzahlen.
+   - Erzeugt Inhalt als Markdown-String.
+   - Übergabe an Files-API zur Ablage, danach Anlage von `domus_reports` + `domus_file_links(entityType=report)`.
 
-- `id`
-- `uid` (string, Nextcloud-User-ID)
-- `role` (string, `admin`/`verwalter`/`mieter`)
-- `created_at`
+7. `DashboardService`
+   - Berechnung der Übersichtskennzahlen für das Dashboard:
+     - #Immobilien, #Mietobjekte, #aktive Mietverhältnisse
+     - Summe Soll-Miete (Summe `baseRent` aktiver Mietverhältnisse im aktuellen Jahr)
+     - Miete/m² Kennzahlen.
 
-(Mindestens „verwalter“ und „mieter“ werden genutzt; „admin“ optional für spätere Konfiguration.)
+8. `FileLinkService`
+   - CRUD für Verknüpfung zu NC-Dateien.
+   - Validierung, dass Pfad im User-Home liegt.
+   - Liefert Liste der verknüpften Dateien pro Entity.
 
-### 2. Backend-Klassen
+9. `RoleService` (leichtgewichtig)
+   - Ableitung, ob aktueller User:
+     - Verwalter/Vermieter (Default: jeder eingeloggte User ist „eigener Verwalter/Vermieter“ mit Zugriff auf seine Daten)
+     - Mieter/Eigentümer (über Partner mit `ncUserId = currentUser` und passende Sichtfilter).
 
-**2.1 Application / Bootstrap**
+### Frontend-Komponenten
 
-- `lib/AppInfo/Application.php`
-  - Implementiert `OCP\AppFramework\Bootstrap\IBootstrap`.
-  - Registriert Services (Mapper, Services).
-  - Setzt Middleware, falls nötig (z. B. für Rollenprüfung).
+**1. Haupt-Template (`templates/main.php`)**  
+- Registriert als Standard-View der App.  
+- Bindet:
+  - Nextcloud-Header und -Styles
+  - `<div id="app-navigation"></div>`
+  - `<div id="app-content"></div>`
+  - `<div id="app-sidebar"></div>`
+  - JS-Datei: `domus-main.js`
 
-**2.2 Controller**
+**2. JS Namespace `Domus`**
 
-- `lib/Controller/PageController`
-  - Route: `/` → rendert Hauptseite der App (Template `index.php`).
-  - #[NoAdminRequired], #[NoCSRFRequired] für Haupt-View.
+- `Domus.Api`
+  - Wrapper um `fetch` mit:
+    - `OC.generateUrl('/apps/domus/...')`
+    - Header `OCS-APIREQUEST: 'true'`
+    - `Content-Type: application/json` bei POST/PUT
+  - Methoden wie `getProperties()`, `createProperty(data)`, etc.
 
-- `lib/Controller/ViewController`
-  - Liefert HTML-Partials für:
-    - Dashboard
-    - Listenansichten (Immobilien, Mietobjekte, Mieter, Mietverhältnisse, Buchungen)
-    - Detailansichten (Immobilie, Mietobjekt, Mieter, Mietverhältnis)
-  - Rendered Twig-/PHP-Templates mit serverseitigem HTML, das per AJAX in `#app-content` injiziert wird.
+- `Domus.Navigation`
+  - Initialisiert Navigation (<ul> unter `app-navigation`).
+  - Einträge: Dashboard, Immobilien, Mietobjekte, Geschäftspartner, Mietverhältnisse, Einnahmen/Ausgaben, Abrechnungen.
+  - Registriert Click-Handler, die die passenden Views laden.
 
-- `lib/Controller/PropertyController, `UnitController`, `TenantController`, `LeaseController`, `BookingController`, `ReportController`, `FileLinkController`
-  - JSON-CRUD-Endpunkte pro Entität:
-    - `list`, `get`, `create`, `update`, `delete`.
-  - Zusätzliche Endpunkte:
-    - Dashboard-Statistiken (Kennzahlen).
-    - Jahres-Verteilungsstatistik.
-    - Trigger für Abrechnungs-Erstellung.
-    - Datei-Verknüpfung add/remove/list.
-  - Alle JSON-Routen mit #[NoAdminRequired]; CSRF-geschützt außer bei explizit markierten GET-Views.
+- `Domus.Views.*`
+  - Je Modul:
+    - `init()` für Initialaufbau (Filterfelder, Listen-Layout).
+    - `loadData()` ruft entsprechende API-Endpunkte.
+    - Rendering über DOM-APIs / Template-Strings.
+    - CRUD-Formulare als einfache HTML-Forms mit JS-Submit (AJAX).
 
-**2.3 Services**
+- `Domus.Util`
+  - Datum-/Währungsformatierung.
+  - Fehlermeldungsanzeige.
 
-- `RoleService`
-  - Ermittelt Rolle(n) eines Users anhand `immo_role` und/oder Nextcloud-Gruppen (z. B. Gruppen `immo_verwalter`, `immo_mieter` als Fallback).
-  - Methoden: `isManager($uid)`, `isTenant($uid)`.
+Alle sichtbaren Strings über `t('domus', '...')` in den PHP-Templates oder im JS via globaler `t()` Funktion von Nextcloud.
+Alle Erfassungs- und Änderungsdialoge werden in Modals dargestellt
 
-- `PropertyService`, `UnitService`, `TenantService`, `LeaseService`, `BookingService`
-  - Kapseln Business-Logik und Zugriffsprüfungen.
-  - Filtern stets auf `uid_owner` bzw. über Hierarchie (Property → Unit → Lease/Booking), damit Verwalter nur eigene Daten sehen.
-
-- `DashboardService`
-  - Berechnet:
-    - Anzahl Immobilien, Mietobjekte.
-    - Anzahl aktiver Mietverhältnisse.
-    - Summe Soll-Kaltmiete p.a. (aus aktiven Leases).
-    - Miete pro m² (Für Dashboard-Beispiele).
-  - Liefert strukturierte DTOs an Controller.
-
-- `ReportService`
-  - Aggregation von Einnahmen/ Ausgaben pro Jahr und Immobilie.
-  - Berechnung Netto-Ergebnis, einfache Rendite/Kostendeckung (z. B. Netto / Gesamtausgaben).
-  - Ermittlung Miete/m² pro Einheit/Mietverhältnis.
-  - Monatsanteilige Verteilung für Jahresbeträge (`is_yearly = true`) über aktive Mietverhältnisse:
-    - Monatliche Abdeckung je Lease im Jahr bestimmen.
-    - Verteilungsschema erzeugen (als Statistik, nicht zwingend Einzelbuchungen).
-  - Generiert Abrechnungs-Text (Markdown); nutzt OCP\IL10N für alle Strings.
-  - Übergibt Text an `FilesystemService` zur Dateierstellung.
-
-- `FileLinkService`
-  - Erzeugt/verwaltert Einträge in `immo_filelink`.
-  - Prüft Zugriffsrechte auf Nextcloud-Dateien.
-  - Generiert Download-URLs (über Standard-Files-App).
-
-- `FilesystemService`
-  - Arbeitet mit `IRootFolder` und aktuellem User.
-  - Stellt sicher, dass Ordner wie `/ImmoApp/Abrechnungen/<Jahr>/<Immobilie>/` existieren.
-  - Legt Abrechnungsdateien als `.md` oder `.txt` an (V1; Akzeptanz erlaubt „z. B. PDF“ – wir wählen Text/Markdown).
-  - Gibt `fileId` und Pfad an `ReportService` zurück.
-
-### 3. Frontend
-
-- `js/immo-main.js`
-  - Globales Namespace: `window.Immo = window.Immo || {};`
-  - Modul `Immo.App`:
-    - Initialisierung der App nach Laden der Hauptseite.
-    - Aufbau der Navigation (`#app-navigation` → `<ul>` mit Items: Dashboard, Immobilien, Mietobjekte, Mieter, Mietverhältnisse, Einnahmen, Ausgaben, Abrechnungen).
-    - Registriert Klick-Handler; bei Klick:
-      - AJAX-GET an ViewController-Endpunkt (HTML Partial).
-      - Ersetzt Inhalt von `#app-content`.
-  - Untermodule:
-    - `Immo.Api` – generische AJAX-Funktionen (fetch JSON/HTML).
-    - `Immo.Views.Dashboard`, `Immo.Views.Properties`, `Immo.Views.Units`, ...
-      - Binden Formular-Events.
-      - Rufen `Immo.Api` für CRUD.
-      - Aktualisieren Teilbereiche der UI (Listen, Detailansichten).
-
-- JS-Richtlinien:
-  - ES6 (let/const, Arrow Functions, Module-Pattern per IIFE).
-  - Alle AJAX Requests:
-    - Header: `'OCS-APIREQUEST': 'true'`
-    - CSRF-Token aus DOM (`OC.requestToken`) im Header `requesttoken`.
-  - t()-API von Nextcloud im JS:
-    - `t('immo', 'Visible String')` für alle Texte, keine separaten Sprachdateien in V1.
-
-- DOM-Grundstruktur (Template `index.php`):
-
-```html
-<div id="app-navigation"></div>
-<div id="app-content"></div>
-<div id="app-sidebar"></div>
-<script src="<?php print_unescaped(\OCP\Util::linkToScript('immo', 'immo-main')); ?>"></script>
-```
-
-`#app-sidebar` wird v1 kaum genutzt (Platz für Detailinfos / Dateiverknüpfungen).
+---
 
 ## Datenfluss
 
-### 1. Navigation & Views (HTML)
+### Beispiel 1: Immobilie anlegen
 
-1. User öffnet „Immobilien“-App in Nextcloud.
-2. `PageController::index` rendert `index.php` mit leerem Content-Bereich.
-3. `Immo.App.init()` lädt initial das Dashboard:
-   - AJAX: GET `/apps/immo/view/dashboard`
-   - Header: `OCS-APIREQUEST: true`
-4. `ViewController::dashboard`:
-   - Fragt `DashboardService` an.
-   - Rendered `dashboard.php`-Template mit Kennzahlen (l10n via IL10N).
-5. Response (HTML) → JS setzt `#app-content.innerHTML = responseHTML`.
+1. Benutzer klickt auf Navigation „Immobilien“.
+2. `Domus.Views.Properties.init()` ruft `Domus.Api.getProperties()` → `GET /apps/domus/properties`.
+3. `PropertyController::index()`:
+   - `[NoAdminRequired]`
+   - Ermittelt aktuellen User (`IUserSession`).
+   - Ruft `PropertyService::listForUser($userId)`.
+   - Gibt JSON zurück (Properties).
+4. JS rendert Liste und zeigt „Neu“-Button.
+5. Beim Klick auf „Neu“ zeigt JS ein Formular (im Modal Dialog).
+6. Submit → `Domus.Api.createProperty(data)` → `POST /apps/domus/properties`.
+7. `PropertyController::create()`:
+   - Nimmt JSON-Daten entgegen.
+   - Validiert Pflichtfelder.
+   - Setzt `user_id` = currentUser.
+   - Ruft `PropertyService::create(...)`.
+   - Service ruft `PropertyMapper->insert($entity)`.
+   - Antwort: neue Entity als JSON.
+8. JS fügt neue Immobilie in Liste ein.
 
-Wechsel z. B. zur Immobilien-Liste:
+### Beispiel 2: Dashboard laden
 
-1. Klick auf „Immobilien“ in Navigation.
-2. `Immo.Views.Properties.loadList()`.
-3. AJAX GET `/apps/immo/view/props?year=...` (optional Filter).
-4. ViewController ruft `PropertyService::listByOwner($uid)` auf, filtert.
-5. Template `property_list.php` erzeugt HTML-Tabelle.
-6. Response → `#app-content` wird ersetzt.
+1. App-Start → Navigation lädt `Domus.Views.Dashboard.init()`.
+2. `Domus.Api.getDashboard()` → `GET /apps/domus/dashboard`.
+3. `DashboardController::index()`:
+   - nutzt `DashboardService`:
+     - `countPropertiesByUser`
+     - `countUnitsByUser`
+     - `countActiveTenanciesByUser`
+     - `sumAnnualBaseRentByUser(year)`
+     - `sampleRentPerSquareMeterByUser`
+   - Rückgabe JSON.
+4. JS rendert Kacheln und einfache Diagramme (z.B. Tabellen).
 
-### 2. CRUD-Datenfluss (z. B. Immobilie anlegen)
+### Beispiel 3: Jahresabrechnung erstellen
 
-1. User öffnet „Neue Immobilie“-Formular (HTML in `#app-content`).
-2. Submit-Handler in JS verhindert Default.
-3. JS sammelt Formdaten → JSON.
-4. AJAX POST `/apps/immo/api/prop` mit JSON-Body, Header `OCS-APIREQUEST: true`.
-5. Controller (e.g. `PropertyController::create`):
-   - Prüft Rolle (Verwalter).
-   - Validiert Input.
-   - Erstellt Entity `Property`.
-   - Setzt `uid_owner = currentUser`.
-   - Übergibt an `PropertyMapper::insert`.
-6. DB-Eintrag wird erstellt (Migration definierte Tabelle).
-7. Controller gibt JSON mit neuem Objekt zurück.
-8. JS aktualisiert Liste (z. B. neu laden, oder lokal ergänzen).
+1. Benutzer wählt Immobilie X und Jahr Y in Abrechnungen-View.
+2. Klick „Abrechnung erstellen“ → `POST /apps/domus/reports/generate`.
+3. `ReportController::generatePropertyYear(propertyId, year)`:
+   - Owner-Check via `PropertyService`.
+   - Ermittelt Buchungen für Immobilie über `BookingService`.
+   - Ermittelt Mieten/Kennzahlen via `TenancyService` & `UnitService`.
+   - `ReportService::generatePropertyYearReport(...)`:
+     - erzeugt Markdown-Text mit:
+       - Zeitraum, Immobilie, Summen, Kennzahlen
+   - Filesystem:
+     - `IRootFolder` → User-Folder (`user_id`)
+     - Pfad `DomusApp/Abrechnungen/<Jahr>/<ImmobilieName>/Domus-Abrechnung-<Year>.md`
+   - Legt Datei an, erstellt `domus_reports` + `domus_file_links(entityType=report)`.
+   - Gibt Metadaten + Pfad zurück.
+4. JS aktualisiert Liste der Abrechnungen.
 
-Analog für Update/Delete via `PUT`/`DELETE` (oder `POST` mit Action-Feld, falls HTTP-Verb-Beschränkungen bestehen).
+### Beispiel 4: Mieterzugriff
 
-### 3. Mietverhältnis & Statuslogik
+1. Mieter loggt sich in Nextcloud ein.
+2. Öffnet Domus-App.
+3. `DashboardController` bzw. `RoleService` erkennt:
+   - Gibt es `domus_partners` mit `ncUserId = currentUser` und `partnerType = tenant`?
+   - Falls ja: UI wechselt in Mieter-Sicht:
+     - Navigation reduziert: „Meine Mietverhältnisse“, „Meine Abrechnungen“, „Dokumente“.
+4. `TenancyController::listForCurrentTenant()` liefert nur Mietverhältnisse, bei denen `partnerId` = Partner des NC-Users.
+5. `ReportController::listForTenant()` liefert nur Abrechnungen, bei denen Mietverhältnis auf diesen Partner verweist.
 
-- Beim Speichern/Ändern eines Mietverhältnisses:
-  - `LeaseService::save()` berechnet `status`:
-    - `future`: `start > today`
-    - `active`: `start <= today` und (`end` null oder `end >= today`)
-    - `hist`: sonst.
-  - Status wird in DB abgelegt.
-
-Abfragen (z. B. für Dashboard, Listen) nutzen Status-Feld und Datumsfilter.
-
-### 4. Einnahmen/Ausgaben und Jahresfeld
-
-- Beim Anlegen einer Buchung:
-  - `BookingService::create()`:
-    - `year = (int)substr($date, 0, 4)`
-    - Berechnet und speichert.
-- Beim Rendern von Listen (Filter Jahr/Immobilie):
-  - Mapper-Query mit `WHERE prop_id = :propId AND year = :year`.
-
-### 5. Dokumentenverknüpfung
-
-Use-Case: Datei an Mietverhältnis verknüpfen.
-
-1. User öffnet Detailansicht eines Mietverhältnisses.
-2. In `#app-sidebar` oder im Detailbereich wird ein Button „Datei verknüpfen“ angezeigt.
-3. Klick öffnet Standard-NC-Dateiauswahl (über `OC.dialogs.filepicker` oder analoge JS-API).
-4. Nach Auswahl: `fileId` und Pfad im JS verfügbar.
-5. JS sendet POST `/apps/immo/api/filelink` mit:
-   - `{ objType: 'lease', objId: <leaseId>, fileId: <fileId>, path: <path> }`
-6. `FileLinkController::create`:
-   - Prüft, ob aktueller User Zugriff auf Lease hat (Verwalter, dem die zugehörige Immobilie gehört).
-   - Prüft mit `IRootFolder`, ob Datei existiert und User Leserecht hat.
-   - Legt Eintrag in `immo_filelink` an.
-7. Detailansicht ruft Liste der Filelinks:
-   - GET `/apps/immo/api/filelink?objType=lease&objId=...`
-8. Antwort enthält Metadaten (Pfad, Name).
-9. JS rendert Links (href zum NC-Files-Viewer basierend auf Pfad oder fileId).
-
-Mieter-Sicht: Bei Zugriff auf Mietverhältnis-/Abrechnungsseite wird dieselbe Filelink-Liste gezeigt, jedoch nur für Objekte, auf die der Mieter berechtigt ist (Logik s. Sicherheit).
-
-### 6. Abrechnungs-Erstellung
-
-Use-Case: Verwalter erstellt Jahresabrechnung für Immobilie X, Jahr Y.
-
-1. In UI: Formular „Abrechnung erzeugen“ mit Auswahl Immobilie, Jahr.
-2. Submit → AJAX POST `/apps/immo/api/report` `{ propId, year }`.
-3. `ReportController::createForProperty`:
-   - Prüft Rolle: Verwalter und Eigentum an Immobilie.
-   - Ruft `ReportService::generate($propId, $year)`.
-
-`ReportService::generate`:
-
-1. Holt alle Buchungen für Immobilie+Jahr.
-2. Aggregiert:
-   - Summe Einnahmen pro Kategorie.
-   - Summe Ausgaben pro Kategorie.
-   - Netto-Ergebnis.
-3. Holt Kennzahlen:
-   - Gesamtfläche der Einheiten (optional).
-   - Summe Kaltmieten aus aktiven Mietverhältnissen für das Jahr.
-4. Generiert Markdown-Text:
-   - Kopf (Immobilienname, Adresse, Jahr).
-   - Tabellen/Summenblöcke nach Kategorien.
-   - Kennzahlen-Block (Netto, evtl. Rendite/Kostendeckung).
-5. Übergibt Text zu `FilesystemService::createReportFile($ownerUid, $propName, $year, $content)`.
-
-`FilesystemService::createReportFile`:
-
-1. Arbeitet im Kontext des Verwalter-Users:
-   - Ordnerpfad: `/ImmoApp/Abrechnungen/<year>/<sanitizedPropName>/`
-   - Legt Ordnerstruktur an, falls nicht vorhanden.
-2. Legt Datei, z. B. `Abrechnung_<year>.md`, an.
-3. Gibt `fileId`, `path` zurück.
-
-6. `ReportService` erzeugt `immo_report`-Eintrag + `immo_filelink` (`obj_type = 'report'` / oder `prop`+Sondertyp).
-7. Controller gibt JSON mit Metadaten (Pfad, Dateiname) zurück.
-8. UI aktualisiert Liste der Abrechnungen für Immobilie (GET `/apps/immo/api/report?propId=...`).
-
-Mieter-Sicht: Mieter können über zugeordnete Mietverhältnisse/Immobilien auf Reports zugreifen, wenn gewünscht (zunächst: Immobilie-Abrechnungen werden angezeigt, sofern Mietverhältnis im Jahr besteht).
-
-### 7. Dashboard & Verteilungsstatistik
-
-- Dashboard:
-  - JS ruft `/apps/immo/api/dashboard?year=<current>` → JSON.
-  - `DashboardService` ermittelt:
-    - Anzahl Immobilien (`immo_prop` nach `uid_owner`).
-    - Anzahl Mietobjekte.
-    - Anzahl aktiver Leases (`status = active`).
-    - Summe Soll-Kaltmiete:
-      - Für jedes aktive Lease im Jahr: anteilige Jahreskaltmiete, einfachheitshalber V1: `rent_cold * 12` oder genauer: Monatsanzahl im Jahr.
-    - Beispielhafte Miete/m² (z. B. erste Einheit mit Fläche>0).
-  - JS rendert Kennzahlen im Dashboard.
-
-- Jahresbetrag-Verteilung:
-  - `ReportService::getYearlyDistribution($propId, $year)`:
-    - Holt `immo_book` mit `is_yearly = 1`.
-    - Ermittelt Leases, die im Jahr aktiv sind.
-    - Berechnet belegte Monate pro Lease.
-    - Führt pro Jahresbuchung eine anteilige Zuordnung (als Ergebnis-Array):
-      - `[leaseId => amountShare]`.
-    - Diese Statistik wird im UI als Tabelle/Chart im Statistik-Tab angezeigt, nicht als eigene Buchungen.
+---
 
 ## Schnittstellen
 
-### 1. Nextcloud-Integration
+### HTTP-Routen (appinfo/routes.php)
 
-- **User/Groups**
-  - `OCP\IUserSession` für aktuellen User.
-  - `OCP\IGroupManager` optional für Gruppenzuordnung (z. B. `immo_verwalter`/`immo_mieter`).
-  - `RoleService` kombiniert Gruppen + `immo_role`-Tabelle.
+CRUD-Endpunkte, alle als eigene Controller-Routen, kein OCS.
 
-- **Datenbank**
-  - Migrations in `lib/Migration/VersionXXXX.php`.
-  - Nutzung des `\OCP\DB\ISchemaWrapper` via Migration-Klassen.
-  - Mapper-Klassen erweitern `OCP\AppFramework\Db\QBMapper`.
+Beispiele (alle mit Prefix `/apps/domus`):
 
-- **Dateisystem**
-  - `OCP\Files\IRootFolder` → `getUserFolder($uid)`.
-  - Ordner-/Dateiverwaltung ausschließlich im User-Kontext (kein globaler FS).
+**Dashboard**  
+- `GET /dashboard` → `DashboardController#index`
 
-- **Navigation**
-  - `info.xml` → `<navigation>` mit `route` auf `PageController#index`.
-  - Icon & Name lokalisiert via IL10N.
+**Immobilien**  
+- `GET /properties` → `PropertyController#index`
+- `GET /properties/{id}` → `PropertyController#show`
+- `POST /properties` → `PropertyController#create`
+- `PUT /properties/{id}` → `PropertyController#update`
+- `DELETE /properties/{id}` → `PropertyController#destroy`
 
-- **Routing**
-  - `appinfo/routes.php`:
-    - Page-Routen (`page#index`).
-    - View-Routen (`view#dashboard`, `view#propList`, etc.).
-    - API-Routen (`property#list`, `property#create`, etc.).
-  - Alle unter `/apps/immo/...`.
+**Mietobjekte (Units)**  
+- `GET /units` (+ optional Filter `propertyId`) → `UnitController#index`
+- `GET /units/{id}` → `UnitController#show`
+- `POST /units` → `UnitController#create`
+- `PUT /units/{id}` → `UnitController#update`
+- `DELETE /units/{id}` → `UnitController#destroy`
 
-### 2. REST-ähnliche API (interne Nutzung durch JS)
+**Geschäftspartner**  
+- `GET /partners` → `PartnerController#index`
+- `GET /partners/{id}` → `PartnerController#show`
+- `POST /partners` → `PartnerController#create`
+- `PUT /partners/{id}` → `PartnerController#update`
+- `DELETE /partners/{id}` → `PartnerController#destroy`
 
-Beispiele (alle ohne OCS):
+**Mietverhältnisse**  
+- `GET /tenancies` (Filter `unitId`, `partnerId`) → `TenancyController#index`
+- `GET /tenancies/{id}` → `TenancyController#show`
+- `POST /tenancies` → `TenancyController#create`
+- `PUT /tenancies/{id}` → `TenancyController#update`
+- `POST /tenancies/{id}/end` (setzt Enddatum) → `TenancyController#end`
 
-- Immobilien:
-  - `GET /apps/immo/api/prop` → Liste
-  - `GET /apps/immo/api/prop/{id}` → Detail
-  - `POST /apps/immo/api/prop` → create
-  - `PUT /apps/immo/api/prop/{id}` → update
-  - `DELETE /apps/immo/api/prop/{id}` → delete
+**Einnahmen/Ausgaben (Bookings)**  
+- `GET /bookings` (Filter: `year`, `propertyId`, `unitId`, `tenancyId`) → `BookingController#index`
+- `GET /bookings/{id}` → `BookingController#show`
+- `POST /bookings` → `BookingController#create`
+- `PUT /bookings/{id}` → `BookingController#update`
+- `DELETE /bookings/{id}` → `BookingController#destroy`
 
-Ähnlich für:
+**Dateiverknüpfungen**  
+- `GET /files/{entityType}/{entityId}` → `FileLinkController#index`
+- `POST /files` (Body: `entityType`, `entityId`, `filePath`, `label`) → `FileLinkController#create`
+- `DELETE /files/{id}` → `FileLinkController#destroy`
 
-- `api/unit`
-- `api/tenant`
-- `api/lease`
-- `api/book`
-- `api/report` (GET list je Immobilie/Jahr, POST generate)
-- `api/filelink`
+**Abrechnungen**  
+- `GET /reports` (Filter: `year`, `propertyId`) → `ReportController#index`
+- `POST /reports/propertyYear` → `ReportController#generatePropertyYear`
+- `GET /reports/{id}` → Details + Download-URL zur Datei ausgeben (eigener Link → Files-App).
 
-Dashboard/Statistik:
+**Rollen**  
+- `GET /roles/me` → `RoleController#getCurrentRoles` (z. B. `{ isManager: true, isTenant: true, isOwner: false }`)
 
-- `GET /apps/immo/api/dashboard`
-- `GET /apps/immo/api/stats/distribution?propId=&year=`
+Alle Controller nutzen Attribute:
+- `#[NoAdminRequired]`
+- Optional `#[NoCSRFRequired]` nur für GET-Requests / idempotente API-Calls; für Schreiboperationen möglichst mit CSRF-Token arbeiten (Nextcloud-Standard).
 
-### 3. Frontend-Helper
-
-- `Immo.Api.request(method, url, data, expectHtml = false)`
-  - Fügt Header `OCS-APIREQUEST` und CSRF-Token ein.
-  - Parser: JSON oder Text.
-
-Die API ist explizit als interne Browser-API gedacht, keine öffentliche OCS-API.
+---
 
 ## Sicherheitsanforderungen
 
 1. **Authentifizierung**
-   - Ausschließlich Nextcloud-Login; kein eigener Mechanismus.
-   - Alle Controller erfordern eingeloggten User (`#[NoAdminRequired]`, aber kein `#[PublicPage]`).
+   - Ausschließlich über Nextcloud-Login.
+   - Kein eigener Login, kein Passwort-Handling.
 
-2. **Autorisierung & Multi-Tenancy**
-   - Verwalter sehen nur ihre Daten:
-     - `immo_prop.uid_owner = currentUser`.
-     - Alle abhängigen Datensätze (Units, Leases, Bookings) werden über Property-FK validiert.
-   - Mieter sehen nur:
-     - Ihre eigenen Leases (`lease.tenant_id` ist einem Mieter-User zugeordnet; Zuordnung: TB `immo_tenant` kann optional `uid_user` ergänzen, falls direkte NC-User-Verknüpfung nötig ist; falls nicht vorgesehen, wird Mapping anders gelöst – für V1 kann ein Feld `uid_user` ergänzt werden, bleibt unter 20 Zeichen).
-     - Daraus abgeleitete Abrechnungen und Dateien.
-   - `RoleService` prüft Rolle:
-     - Verwalter: vollständige CRUD-Berechtigung gemäß Owner-Filtern.
-     - Mieter: nur Lesezugriff auf „eigene“ Daten:
-       - Leases (wo `lease.tenant_id` einem Tenant gehört, der `uid_user = currentUser` hat).
-       - Filelinks zu diesen Objekten.
-       - Reports zu Properties, an denen ein Lease im jeweiligen Jahr existiert.
+2. **Autorisierung**
+   - Strikter Owner-Check in jeder Service-Methode und jedem Controller:
+     - `user_id` muss dem aktuellen User entsprechen, wenn auf Immobilien, Partner, Bookings etc. zugegriffen wird.
+   - Tenant-/Owner-Sicht:
+     - Beim Zugriff eines Mieters (Partner mit `ncUserId`):
+       - Nur Entitäten, die direkt über `partnerId` oder indirekt über Mietverhältnisse auf diesen Partner gemappt sind.
+   - Keine Querzugriffe zwischen Benutzern (Achtung bei File-Links: Pfad muss im Home des aktuellen Users liegen).
 
-3. **CSRF & Input-Validierung**
-   - Standard-NC CSRF per `requesttoken`-Header für POST/PUT/DELETE.
-   - Validierung von Parametern in Controllern/Services:
-     - Pflichtfelder (z. B. Name, Beträge, Datumsfelder).
-     - Typ-/Range-Checks (z. B. kein negativer Betrag, plausible Datumswerte).
+3. **Datenvalidierung**
+   - Backend:
+     - Pflichtfelder prüfen (Name, Zuordnungen, Beträge, Datum).
+     - Typ- und Wertebereichsprüfung (Beträge nicht negativ, Datum sinnvoll).
+   - Frontend:
+     - Zusätzliche Validierung, aber Backend ist führend.
 
-4. **Dateisystem-Sicherheit**
-   - Zugriff auf Dateien ausschließlich über Nextcloud-Files; keine direkten Pfade außerhalb User-Folder.
-   - Bevor ein `immo_filelink` erzeugt wird:
-     - Prüfen, ob Datei in `IRootFolder->getUserFolder($currentUser)` existiert und lesbar ist.
-   - Beim Rendern von Links:
-     - Nur Pfade/IDs anzeigen, die im Kontext des aktuellen Users überhaupt existieren.
-   - Mieter sehen nur Links, die über zulässige Objekte (eigene Leases/Reports) referenziert sind.
+4. **CSRF / XSS**
+   - Nutzung von Nextcloud-CSRF-Token für state-changing Calls.
+   - JSON-Ausgaben nur mit korrekt escaped Strings; HTML wird im Frontend generiert, nicht aus DB übernommen.
+   - Keine usergenerierten HTML-Snippets; Freitextfelder nur als Text anzeigen.
 
-5. **Datenisolation & Multi-Mandantenfähigkeit**
-   - Striktes Filtern nach `uid_owner` oder `uid_user` in allen Mapperaktionen, nicht erst im Frontend.
-   - Keine Möglichkeit, fremde IDs direkt abzufragen, ohne Filterung im Backend.
+5. **Dateisystem**
+   - File-Verknüpfungen:
+     - `filePath` muss im Home-Verzeichnis des aktuellen Users liegen.
+     - Zugriffe auf Dateien laufen über Standard-Files-App (via Link), kein direkter Pfadzugriff aus Domus.
+   - Abrechnungen:
+     - Nur im Home des Besitzers anlegen.
 
-6. **Audit & Logging (grundlegend)**
-   - Fehler und Sicherheits-relevante Events (z. B. unberechtigte Zugriffsversuche) über `OCP\ILogger` loggen.
+6. **Rechte / Rollen**
+   - In V1 keine feingranularen ACLs auf Objekt-Ebene, aber:
+     - Jede Immobilie ist genau einem User zugeordnet.
+     - Kein Teilen von Immobilien zwischen NC-Usern in V1.
 
-7. **Internationalisierung**
-   - Alle Strings via `IL10N` und `t('immo', '...')`.
-   - Keine sensiblen Daten in Übersetzungen.
-
-## Risiken
-
-1. **Rollen-/Rechtekomplexität**
-   - Risiko: Falsche Zuordnung von Daten zu `uid_owner` oder `uid_user` kann zu Datenlecks führen.
-   - Mitigation:
-     - Zentrale Role-/Permission-Checks im Service-Layer.
-     - Keine direkten Mapper-Aufrufe aus Controllern ohne Service.
-
-2. **Mieter-Mapping zu Nextcloud-Usern**
-   - Unklarheit, wie ein Mieter-User mit einem `immo_tenant`-Datensatz verknüpft wird.
-   - Lösungsvorschlag:
-     - Feld `uid_user` in `immo_tenant` einführen (≤ 20 chars).
-     - Risiko: Inkonsistenz, falls Mieter keinen NC-Account hat – in V1: Mieterrolle nur für Mieter mit NC-User; andere bleiben „stumm“.
-
-3. **Leistungsprobleme bei Aggregationen**
-   - Viele Buchungen/Leases können Abrechnungs-Queries teuer machen.
-   - Mitigation:
-     - Nutzung aggregierender DB-Queries (SUM, GROUP BY) statt PHP-Schleifen.
-     - Caching von Kennzahlen optional in späteren Versionen.
-
-4. **Komplexität Verteilungslogik**
-   - Monatsgenaue Aufteilung bei unterjährigen Mietwechseln kann fehleranfällig sein.
-   - Mitigation:
-     - Klare, getestete Hilfsfunktionen:
-       - `getMonthsInYearForLease(lease, year)`.
-     - In V1 nur Anzeige in Statistik, keine weitere Verarbeitung.
-
-5. **UI-Komplexität mit Vanilla JS**
-   - Ohne Framework steigt Wartungsaufwand.
-   - Mitigation:
-     - Strikte Modulstruktur (`Immo.Views.*`).
-     - Klare Trennung von Rendering-Funktionen und Event-Bindings.
-     - Wiederverwendbare Form/Listen-Komponenten.
-
-6. **Datei-/Pfadkollissionen im FS**
-   - Mehrere Abrechnungen pro Jahr/Immobilie (Re-Runs) können überschreiben.
-   - Mitigation:
-     - Versionierte Dateinamen, z. B. `Abrechnung_<year>_v<counter>.md` oder Timestamp.
-     - `ReportService` prüft vorhandene Dateien und inkrementiert.
-
-7. **Nicht-Abdeckung zukünftiger Nextcloud-Versionen**
-   - App ist explizit auf NC 32 ausgelegt.
-   - Mitigation:
-     - Klare Dokumentation in `info.xml`.
-     - Spätere Migrationspfade bei neuen NC-Versionen.
+7. **Input-Security**
+   - Nutzung des AppFramework Request-Objekts.
+   - Kein Eval, keine dynamische Codeausführung.
+   - Prepared Statements über Mappers.
 
 ---
 
-Dieses technische Konzept bildet die Basis für Implementierung der Immo App nach den vorgegebenen Nextcloud-Standards und erfüllt die MVP-Anforderungen (Dashboard, Stammdaten-CRUD, Einnahmen/Ausgaben, Datei-Verknüpfung, Jahresabrechnung, Rollen „Verwalter“/„Mieter“).
+## Risiken
+
+1. **Rollenmodell (Mieter/Eigentümer vs. NC-User)**
+   - Risiko: In realen Installationen haben viele Mieter keinen Nextcloud-Account.
+   - Auswirkung: Mieter-Frontend ist nur nutzbar, wenn `ncUserId` gepflegt wird.
+   - Mitigation:
+     - V1: Funktionalität so bauen, dass auch ohne Mieter-Login die Verwalter-/Vermieter-Sicht vollständig ist.
+     - Dokumentation: Mieter-Funktion ist optional und erfordert Benutzeranlage im NC.
+
+2. **Performance bei größeren Datenmengen**
+   - Risiko: Viele Buchungen / Immobilien → Dashboard und Auswertungen langsam.
+   - Mitigation:
+     - Indizes auf `user_id`, `year`, `propertyId`, `unitId`, `tenancyId`.
+     - Paginierung in Listen.
+     - Spätere Einführung eines Cache-Mechanismus möglich.
+
+3. **Komplexität der Verteilungslogik (unterjährige Mietwechsel)**
+   - Risiko: Erwartung an Buchungslogik könnte über MVP hinausgehen.
+   - Mitigation:
+     - V1 klar beschränkt: Verteilung nur in Auswertung, nicht als Einzelbuchungen.
+     - Algorithmus dokumentieren (Monatsanteile, keine tagesgenaue Abrechnung).
+
+4. **Datenkonsistenz bei Löschoperationen**
+   - Risiko: Löschen von Immobilie → verwaiste Einheiten, Mietverhältnisse, Buchungen.
+   - Mitigation:
+     - In V1: Entweder harte Restriktion (Immobilie kann nicht gelöscht werden, wenn abhängige Daten existieren), oder Kaskadenlöschung klar definieren.
+     - Empfehlung: Für MVP keine Kaskadenlöschung, sondern Validierungsfehler und Hinweis.
+
+5. **Frontendentwicklung ohne Framework**
+   - Risiko: Steigender JS-Code → Wartbarkeit.
+   - Mitigation:
+     - Saubere Modulstruktur und Namensräume.
+     - Gemeinsame Utility-Funktionen.
+     - Kleine, gut abgegrenzte Views.
+
+6. **Fehlende Mehrwährungsfähigkeit**
+   - Risiko: Internationaler Einsatz erfordert andere Währungen.
+   - V1 limitiert explizit auf Euro; späterer Ausbau erfordert DB-Änderungen (Currency-Feld).
+   - Mitigation:
+     - Intern Beträge währungsagnostisch speichern, aber UI klar „EUR“ kennzeichnen.
+
+7. **Nextcloud-Versionbindung (nur NC 32)**
+   - Risiko: Änderungen in zukünftigen NC-Versionen.
+   - Mitigation:
+     - In `info.xml` Mindest- und Max-Version definieren.
+     - Klares Upgrade-Konzept für spätere Versionen.
+
+---
+
+Dieses Konzept beschreibt die technische Basis, wie Domus als Nextcloud-App (MVP) umgesetzt wird, inklusive klarer Aufteilung in Backend-Services, Entities/Mapper, JS-Frontend-Module und der Nutzung ausschließlich vorhandener Nextcloud-Infrastruktur (User, DB, Files).
